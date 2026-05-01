@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: Shellcheck (recover.sh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y shellcheck
+          shellcheck --severity=warning scripts/recover.sh
+
+  python-lint:
+    name: Python lint (decode.py)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install linters
+        run: pip install --quiet ruff
+      - name: Ruff check
+        run: ruff check scripts/decode.py
+      - name: Compile-check
+        run: python -m py_compile scripts/decode.py
+
+  bats-tests:
+    name: bats tests (if present)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect bats tests
+        id: detect
+        run: |
+          if [ -d tests/bats ]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No tests/bats directory yet — skipping. Tracked in Phase 1 (issue #3)."
+          fi
+      - name: Install bats
+        if: steps.detect.outputs.has_tests == 'true'
+        run: brew install bats-core
+      - name: Run bats
+        if: steps.detect.outputs.has_tests == 'true'
+        run: bats tests/bats
+
+  readme-link-check:
+    name: README link check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify README internal links resolve
+        run: |
+          # crude check: every [..](path) where path starts with ./ or no scheme should exist
+          fail=0
+          while IFS= read -r line; do
+            target="${line#*](}"; target="${target%%)*}"
+            case "$target" in
+              http*|\#*|mailto:*) continue ;;
+              *) [ -e "$target" ] || { echo "Broken link: $target"; fail=1; } ;;
+            esac
+          done < <(grep -oE '\]\([^)]+\)' README.md)
+          exit "$fail"
