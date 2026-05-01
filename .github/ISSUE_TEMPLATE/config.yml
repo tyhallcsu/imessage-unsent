@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 🗺️ Roadmap (issue #26)
+    url: https://github.com/tyhallcsu/imessage-unsent/issues/26
+    about: Phased build-out plan. Pick the next unblocked issue from here.
+  - name: 📖 Agent onboarding
+    url: https://github.com/tyhallcsu/imessage-unsent/blob/main/docs/agent-onboarding.md
+    about: Mental model + workflow loop for AI agents dropping into this repo.
+  - name: 📜 Conventions (AGENTS.md)
+    url: https://github.com/tyhallcsu/imessage-unsent/blob/main/AGENTS.md
+    about: Hard rules and conventions every contributor (human or AI) must follow.
