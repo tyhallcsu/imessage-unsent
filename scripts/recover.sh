@@ -26,6 +26,20 @@
 
 set -uo pipefail   # NOT -e: each vector runs independently and may fail without aborting
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/lib"
+
+# shellcheck source=lib/common.sh
+source "$LIB_DIR/common.sh"
+# shellcheck source=lib/snapshot.sh
+source "$LIB_DIR/snapshot.sh"
+# shellcheck source=lib/scan.sh
+source "$LIB_DIR/scan.sh"
+# shellcheck source=lib/wal.sh
+source "$LIB_DIR/wal.sh"
+# shellcheck source=lib/decode.sh
+source "$LIB_DIR/decode.sh"
+
 # ─── arg parsing ───────────────────────────────────────────────────────────
 HANDLE=""
 ROWID=""
@@ -69,16 +83,23 @@ hr
 
 # ─── Step 0 ─── Freeze state ───────────────────────────────────────────────
 log "[0] Quitting Messages.app and snapshotting chat.db family..."
-osascript -e 'quit app "Messages"' 2>/dev/null || true
-sleep 2
-for f in chat.db chat.db-wal chat.db-shm; do
-  if [[ -f "$LIVE/$f" ]]; then
-    cp "$LIVE/$f" "$WORK/$f"
-    log "  copied $f  ($(stat -f '%z' "$WORK/$f") bytes, mtime $(stat -f '%Sm' "$WORK/$f"))"
-  else
-    log "  WARN: $LIVE/$f not present"
-  fi
-done
+if imu_snapshot "$WORK" "$LIVE" >/dev/null; then
+  for f in chat.db chat.db-wal chat.db-shm; do
+    if [[ -f "$WORK/$f" ]]; then
+      log "  copied $f  ($(imu_stat_size "$WORK/$f") bytes, mtime $(imu_stat_mtime "$WORK/$f"))"
+    else
+      log "  WARN: $LIVE/$f not present"
+    fi
+  done
+else
+  for f in chat.db chat.db-wal chat.db-shm; do
+    if [[ -f "$WORK/$f" ]]; then
+      log "  copied $f  ($(imu_stat_size "$WORK/$f") bytes, mtime $(imu_stat_mtime "$WORK/$f"))"
+    else
+      log "  WARN: $LIVE/$f not present"
+    fi
+  done
+fi
 if [[ ! -f "$SNAP" ]]; then
   log "  ABORT: $SNAP missing — does the terminal have Full Disk Access?"
   exit 1
@@ -87,8 +108,7 @@ hr
 
 # ─── Step 1 ─── Locate chat by handle (NOT display_name; that's NULL for 1:1) ─
 log "[1] Resolving handle '$HANDLE' → handle.ROWID..."
-HANDLE_ROWID=$(sqlite3 -readonly "$SNAP" \
-  "SELECT ROWID FROM handle WHERE id = '${HANDLE//\'/\'\'}' LIMIT 1;")
+HANDLE_ROWID=$(imu_handle_rowid "$SNAP" "$HANDLE")
 if [[ -z "$HANDLE_ROWID" ]]; then
   log "  No handle row for '$HANDLE' — try the alternate format (E.164 vs raw, email vs phone)."
   log "  Hint: sqlite3 -readonly $SNAP \"SELECT DISTINCT id FROM handle WHERE id LIKE '%${HANDLE: -4}%';\""
@@ -97,23 +117,9 @@ fi
 log "  -> handle.ROWID = $HANDLE_ROWID"
 
 log "[1b] Locating 1:1 chat for that handle..."
-CHAT_ROWID=$(sqlite3 -readonly "$SNAP" "
-  SELECT c.ROWID
-  FROM chat c
-  JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
-  WHERE chj.handle_id = $HANDLE_ROWID
-    AND c.chat_identifier = '${HANDLE//\'/\'\'}'
-  ORDER BY c.ROWID LIMIT 1;
-")
+CHAT_ROWID=$(imu_chat_rowid "$SNAP" "$HANDLE" "$HANDLE_ROWID")
 if [[ -z "$CHAT_ROWID" ]]; then
   log "  No 1:1 chat found; falling back to most-recently-active chat with this handle."
-  CHAT_ROWID=$(sqlite3 -readonly "$SNAP" "
-    SELECT c.ROWID
-    FROM chat c
-    JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
-    WHERE chj.handle_id = $HANDLE_ROWID
-    ORDER BY c.ROWID DESC LIMIT 1;
-  ")
 fi
 log "  -> chat.ROWID = ${CHAT_ROWID:-(none)}"
 
@@ -127,34 +133,16 @@ fi
 # `date_edited != 0 AND is_empty = 1`. The `date_retracted` column is unused
 # on this build despite being in the schema.
 log "[1c] Searching for inbound retracted messages (date_edited != 0 AND is_empty = 1)..."
-sqlite3 -readonly "$SNAP" <<SQL | tee "$WORK/candidates.tsv" | sed 's/^/    /' | tee -a "$LOG"
-.headers on
-.mode tabs
-SELECT m.ROWID, m.guid,
-       datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime')        AS sent_at,
-       datetime(m.date_edited/1000000000 + 978307200, 'unixepoch', 'localtime') AS edited_at,
-       m.is_from_me, m.is_empty,
-       length(m.attributedBody)       AS ab_len,
-       length(m.message_summary_info) AS msi_len
-FROM message m
-JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
-WHERE cmj.chat_id = $CHAT_ROWID
-  AND m.is_from_me = 0
-  AND m.date_edited != 0
-  AND m.is_empty = 1
-ORDER BY m.date DESC LIMIT 10;
-SQL
+imu_candidate_table "$SNAP" "$CHAT_ROWID" | tee "$WORK/candidates.tsv" | sed 's/^/    /' | tee -a "$LOG"
 
 if [[ -z "$ROWID" ]]; then
-  ROWID=$(sqlite3 -readonly "$SNAP" "
-    SELECT m.ROWID FROM message m
-    JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
-    WHERE cmj.chat_id = $CHAT_ROWID
-      AND m.is_from_me = 0
-      AND m.date_edited != 0
-      AND m.is_empty = 1
-    ORDER BY m.date DESC LIMIT 1;
-  ")
+  CANDIDATE=$(imu_find_candidate "$SNAP" "$HANDLE")
+else
+  CANDIDATE=$(imu_find_candidate "$SNAP" "$HANDLE" "$ROWID")
+fi
+
+if [[ -n "$CANDIDATE" ]]; then
+  IFS='|' read -r ROWID GUID <<<"$CANDIDATE"
 fi
 log "  -> top candidate ROWID: ${ROWID:-(none)}"
 
@@ -165,18 +153,22 @@ if [[ -z "$ROWID" ]]; then
   exit 0
 fi
 
-GUID=$(sqlite3 -readonly "$SNAP" "SELECT guid FROM message WHERE ROWID=$ROWID;")
+if [[ -z "${GUID:-}" ]]; then
+  GUID=$(sqlite3 -readonly "$SNAP" "SELECT guid FROM message WHERE ROWID=$ROWID;")
+fi
 log "  -> candidate GUID: $GUID"
 hr
 
 # ─── Step 2 ─── Dump message_summary_info + attributedBody BLOBs ──────────
 log "[2] Extracting BLOBs for ROWID $ROWID..."
 rm -f "$WORK/msi.bin" "$WORK/ab.bin" "$WORK/msi.xml"
-sqlite3 -readonly "$SNAP" "SELECT writefile('$WORK/msi.bin', message_summary_info) FROM message WHERE ROWID=$ROWID;" >/dev/null
-sqlite3 -readonly "$SNAP" "SELECT writefile('$WORK/ab.bin',  attributedBody)        FROM message WHERE ROWID=$ROWID;" >/dev/null
+SAFE_MSI=$(imu_sql_escape "$WORK/msi.bin")
+SAFE_AB=$(imu_sql_escape "$WORK/ab.bin")
+sqlite3 -readonly "$SNAP" "SELECT writefile('$SAFE_MSI', message_summary_info) FROM message WHERE ROWID=$ROWID;" >/dev/null
+sqlite3 -readonly "$SNAP" "SELECT writefile('$SAFE_AB',  attributedBody)        FROM message WHERE ROWID=$ROWID;" >/dev/null
 
 if [[ -s "$WORK/msi.bin" ]]; then
-  log "  msi.bin: $(stat -f '%z' "$WORK/msi.bin") bytes"
+  log "  msi.bin: $(imu_stat_size "$WORK/msi.bin") bytes"
   plutil -convert xml1 -o "$WORK/msi.xml" "$WORK/msi.bin" 2>>"$LOG" \
     && log "  msi.xml written"
   log "  --- plutil -p msi.bin ---"
@@ -189,7 +181,7 @@ else
   log "  msi.bin: empty"
 fi
 if [[ -s "$WORK/ab.bin" ]]; then
-  log "  ab.bin:  $(stat -f '%z' "$WORK/ab.bin") bytes"
+  log "  ab.bin:  $(imu_stat_size "$WORK/ab.bin") bytes"
 else
   log "  ab.bin:  empty (Apple wipes attributedBody on full retraction)"
 fi
@@ -197,11 +189,8 @@ hr
 
 # ─── Step 3 ─── Optional typedstream decode ───────────────────────────────
 log "[3] Attempting typedstream decode of attributedBody (and ec blobs in msi)..."
-DECODE="$(dirname "$0")/decode.py"
-if [[ ! -f "$DECODE" ]]; then
-  log "  decode.py not found alongside recover.sh — skipping"
-elif python3 -c 'import typedstream' 2>/dev/null; then
-  python3 "$DECODE" "$WORK/ab.bin" "$WORK/msi.bin" 2>&1 | sed 's/^/    /' | tee -a "$LOG"
+if python3 -c 'import typedstream' 2>/dev/null; then
+  imu_decode_blobs "$WORK/ab.bin" "$WORK/msi.bin" "$SCRIPT_DIR/decode.py" 2>&1 | sed 's/^/    /' | tee -a "$LOG"
 else
   log "  python 'typedstream' not installed; install with: pip3 install --user typedstream"
 fi
@@ -213,63 +202,29 @@ WAL="$WORK/chat.db-wal"
 if [[ ! -s "$WAL" ]]; then
   log "  WAL file empty or missing; skipping."
 else
-  log "  WAL size: $(stat -f '%z' "$WAL") bytes"
+  log "  WAL size: $(imu_stat_size "$WAL") bytes"
   PGSIZE=$(sqlite3 -readonly "$SNAP" "PRAGMA page_size;")
-  log "  page_size = $PGSIZE  approx_frames = $(( ($(stat -f '%z' "$WAL") - 32) / (24 + PGSIZE) ))"
+  WAL_SIZE=$(imu_stat_size "$WAL")
+  log "  page_size = $PGSIZE  approx_frames = $(( (WAL_SIZE - 32) / (24 + PGSIZE) ))"
 
   # Search WAL for the GUID; it appears in the messages page record near the original text.
   log "  searching for GUID byte string..."
   HITS=$(grep -aob "$GUID" "$WAL" | cut -d: -f1)
   log "  GUID occurrences in WAL: $(printf '%s\n' "$HITS" | wc -l | tr -d ' ')"
 
-  python3 - "$WAL" "$GUID" "$WORK/wal-hits.txt" <<'PY' 2>&1 | sed 's/^/    /' | tee -a "$LOG"
-import sys
-wal_path, guid, out_path = sys.argv[1], sys.argv[2].encode(), sys.argv[3]
-with open(wal_path, 'rb') as f:
-    data = f.read()
-hits, start = [], 0
-while True:
-    i = data.find(guid, start)
-    if i < 0: break
-    hits.append(i); start = i + 1
-
-# The serialized message row stores: ... <guid TEXT 36 bytes> <text TEXT N bytes>
-# followed by the typedstream marker b'\x04\x0bstreamtyped'.
-# So bytes immediately after each GUID hit are candidate text.
-seen = set()
-results = []
-for off in hits:
-    after = data[off+36:off+36+512]
-    end = after.find(b'\x04\x0bstreamtyped')
-    if end <= 0:
-        continue
-    candidate = after[:end]
-    # Skip leading control bytes (length prefixes)
-    while candidate and candidate[0] < 0x20 and candidate[0] not in (0x09, 0x0a, 0x0d):
-        candidate = candidate[1:]
-    if not candidate:
-        continue
-    try:
-        text = candidate.decode('utf-8')
-    except UnicodeDecodeError:
-        continue
-    if not any(c.isprintable() for c in text):
-        continue
-    key = text[:120]
-    if key in seen:
-        continue
-    seen.add(key)
-    results.append((off, text))
-
-with open(out_path, 'w') as out:
-    if not results:
-        msg = "No pre-retract text found following any GUID occurrence."
-        print(msg); out.write(msg + "\n")
-    else:
-        for off, text in results:
-            line = f"WAL_OFFSET {off}  LEN {len(text)}  TEXT: {text!r}"
-            print(line); out.write(line + "\n")
-PY
+  WAL_RESULTS=$(imu_extract_from_wal "$WAL" "$GUID")
+  : > "$WORK/wal-hits.txt"
+  if [[ -z "$WAL_RESULTS" ]]; then
+    log "  No pre-retract text found following any GUID occurrence."
+    printf "No pre-retract text found following any GUID occurrence.\n" > "$WORK/wal-hits.txt"
+  else
+    while IFS=$'\t' read -r off len text; do
+      text_repr=$(python3 -c 'import sys; print(repr(sys.argv[1]))' "$text")
+      line="WAL_OFFSET $off  LEN $len  TEXT: $text_repr"
+      log "  $line"
+      printf "%s\n" "$line" >> "$WORK/wal-hits.txt"
+    done <<< "$WAL_RESULTS"
+  fi
 fi
 hr
 
