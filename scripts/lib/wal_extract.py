@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
-import sys
+import argparse
+import base64
+import json
 from pathlib import Path
 
 
@@ -52,11 +54,31 @@ def extract_candidates(wal_path: Path, guid: str) -> list[tuple[int, str]]:
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print("usage: wal_extract.py <chat.db-wal> <guid>", file=sys.stderr)
-        return 2
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("wal_path", type=Path)
+    parser.add_argument("guid")
+    args = parser.parse_args()
 
-    for offset, text in extract_candidates(Path(sys.argv[1]), sys.argv[2]):
+    results = extract_candidates(args.wal_path, args.guid)
+    if args.json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "offset": offset,
+                        "length": len(text),
+                        "text": text,
+                        "text_b64": base64.b64encode(text.encode("utf-8")).decode("ascii"),
+                    }
+                    for offset, text in results
+                ],
+                ensure_ascii=False,
+            )
+        )
+        return 0
+
+    for offset, text in results:
         print(f"{offset}\t{len(text)}\t{text}")
     return 0
 

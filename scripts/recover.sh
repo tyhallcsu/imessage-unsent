@@ -10,6 +10,7 @@
 #   ./recover.sh --handle 'someone@icloud.com'  # Apple ID email
 #   ./recover.sh --handle '+1...' --rowid 123   # skip auto-detect; force ROWID
 #   ./recover.sh --handle '+1...' --work /custom/dir
+#   ./recover.sh --handle '+1...' --json       # emit machine-readable JSON on stdout
 #
 # Prerequisites:
 #   - Full Disk Access granted to your terminal (System Settings → Privacy & Security → Full Disk Access)
@@ -45,6 +46,7 @@ HANDLE=""
 ROWID=""
 WORK="/tmp/imessage-recovery"
 LIVE="$HOME/Library/Messages"
+JSON_MODE=0
 
 usage() {
   sed -n '2,30p' "$0"
@@ -56,6 +58,7 @@ while [[ $# -gt 0 ]]; do
     --handle) HANDLE="$2"; shift 2 ;;
     --rowid)  ROWID="$2";  shift 2 ;;
     --work)   WORK="$2";   shift 2 ;;
+    --json)   JSON_MODE=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "unknown arg: $1" >&2; usage 1 ;;
   esac
@@ -66,13 +69,38 @@ if [[ -z "$HANDLE" ]]; then
   usage 1
 fi
 
+if [[ -n "$ROWID" && ! "$ROWID" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: --rowid must be numeric" >&2
+  exit 1
+fi
+
 mkdir -p "$WORK"
 LOG="$WORK/report.txt"
 SNAP="$WORK/chat.db"
+MSI="$WORK/msi.bin"
+AB="$WORK/ab.bin"
+MSI_XML="$WORK/msi.xml"
+WAL_JSON="$WORK/wal-candidates.json"
 : > "$LOG"
 
 log() { printf '%s\n' "$*" | tee -a "$LOG" >&2; }
 hr()  { log "================================================================"; }
+
+json_report() {
+  python3 "$LIB_DIR/json_report.py" \
+    --ran-at "$RAN_AT" \
+    --handle "$HANDLE" \
+    --chat-rowid "${CHAT_ROWID:-}" \
+    --rowid "${ROWID:-}" \
+    --guid "${GUID:-}" \
+    --sent-at "${SENT_AT:-}" \
+    --edited-at "${EDITED_AT:-}" \
+    --msi "$MSI" \
+    --ab "$AB" \
+    --wal-json "$WAL_JSON"
+}
+
+RAN_AT=$(imu_iso_utc)
 
 hr
 log "imessage-unsent recovery — $(date)"
@@ -112,6 +140,10 @@ HANDLE_ROWID=$(imu_handle_rowid "$SNAP" "$HANDLE")
 if [[ -z "$HANDLE_ROWID" ]]; then
   log "  No handle row for '$HANDLE' — try the alternate format (E.164 vs raw, email vs phone)."
   log "  Hint: sqlite3 -readonly $SNAP \"SELECT DISTINCT id FROM handle WHERE id LIKE '%${HANDLE: -4}%';\""
+  if [[ "$JSON_MODE" == "1" ]]; then
+    printf '[]\n' > "$WAL_JSON"
+    json_report
+  fi
   exit 1
 fi
 log "  -> handle.ROWID = $HANDLE_ROWID"
@@ -125,6 +157,10 @@ log "  -> chat.ROWID = ${CHAT_ROWID:-(none)}"
 
 if [[ -z "$CHAT_ROWID" ]]; then
   log "  ABORT: no chat found for handle $HANDLE"
+  if [[ "$JSON_MODE" == "1" ]]; then
+    printf '[]\n' > "$WAL_JSON"
+    json_report
+  fi
   exit 1
 fi
 
@@ -133,7 +169,7 @@ fi
 # `date_edited != 0 AND is_empty = 1`. The `date_retracted` column is unused
 # on this build despite being in the schema.
 log "[1c] Searching for inbound retracted messages (date_edited != 0 AND is_empty = 1)..."
-imu_candidate_table "$SNAP" "$CHAT_ROWID" | tee "$WORK/candidates.tsv" | sed 's/^/    /' | tee -a "$LOG"
+imu_candidate_table "$SNAP" "$CHAT_ROWID" | tee "$WORK/candidates.tsv" | sed 's/^/    /' | tee -a "$LOG" >&2
 
 if [[ -z "$ROWID" ]]; then
   CANDIDATE=$(imu_find_candidate "$SNAP" "$HANDLE")
@@ -150,6 +186,10 @@ if [[ -z "$ROWID" ]]; then
   log "  No unsent inbound message found in chat $CHAT_ROWID."
   log "  If you're sure one exists, check edited messages too:"
   log "    sqlite3 -readonly $SNAP \"SELECT ROWID, date_edited, is_empty FROM message WHERE handle_id=$HANDLE_ROWID AND date_edited!=0 ORDER BY date DESC LIMIT 10;\""
+  if [[ "$JSON_MODE" == "1" ]]; then
+    printf '[]\n' > "$WAL_JSON"
+    json_report
+  fi
   exit 0
 fi
 
@@ -157,22 +197,27 @@ if [[ -z "${GUID:-}" ]]; then
   GUID=$(sqlite3 -readonly "$SNAP" "SELECT guid FROM message WHERE ROWID=$ROWID;")
 fi
 log "  -> candidate GUID: $GUID"
+IFS='|' read -r SENT_AT EDITED_AT <<<"$(sqlite3 -readonly -separator '|' "$SNAP" "
+  SELECT datetime(date/1000000000 + 978307200, 'unixepoch', 'localtime'),
+         datetime(date_edited/1000000000 + 978307200, 'unixepoch', 'localtime')
+  FROM message WHERE ROWID=$ROWID;
+")"
 hr
 
 # ─── Step 2 ─── Dump message_summary_info + attributedBody BLOBs ──────────
 log "[2] Extracting BLOBs for ROWID $ROWID..."
-rm -f "$WORK/msi.bin" "$WORK/ab.bin" "$WORK/msi.xml"
-SAFE_MSI=$(imu_sql_escape "$WORK/msi.bin")
-SAFE_AB=$(imu_sql_escape "$WORK/ab.bin")
+rm -f "$MSI" "$AB" "$MSI_XML"
+SAFE_MSI=$(imu_sql_escape "$MSI")
+SAFE_AB=$(imu_sql_escape "$AB")
 sqlite3 -readonly "$SNAP" "SELECT writefile('$SAFE_MSI', message_summary_info) FROM message WHERE ROWID=$ROWID;" >/dev/null
 sqlite3 -readonly "$SNAP" "SELECT writefile('$SAFE_AB',  attributedBody)        FROM message WHERE ROWID=$ROWID;" >/dev/null
 
-if [[ -s "$WORK/msi.bin" ]]; then
-  log "  msi.bin: $(imu_stat_size "$WORK/msi.bin") bytes"
-  plutil -convert xml1 -o "$WORK/msi.xml" "$WORK/msi.bin" 2>>"$LOG" \
+if [[ -s "$MSI" ]]; then
+  log "  msi.bin: $(imu_stat_size "$MSI") bytes"
+  plutil -convert xml1 -o "$MSI_XML" "$MSI" 2>>"$LOG" \
     && log "  msi.xml written"
   log "  --- plutil -p msi.bin ---"
-  plutil -p "$WORK/msi.bin" 2>/dev/null | head -60 | sed 's/^/    /' | tee -a "$LOG"
+  plutil -p "$MSI" 2>/dev/null | head -60 | sed 's/^/    /' | tee -a "$LOG" >&2
   log "  -------------------------"
   log "  Note: For *fully unsent* messages this plist contains metadata only:"
   log "    rp = retracted parts, otr.0.le = original char length, ust = user-sent text marker."
@@ -180,8 +225,8 @@ if [[ -s "$WORK/msi.bin" ]]; then
 else
   log "  msi.bin: empty"
 fi
-if [[ -s "$WORK/ab.bin" ]]; then
-  log "  ab.bin:  $(imu_stat_size "$WORK/ab.bin") bytes"
+if [[ -s "$AB" ]]; then
+  log "  ab.bin:  $(imu_stat_size "$AB") bytes"
 else
   log "  ab.bin:  empty (Apple wipes attributedBody on full retraction)"
 fi
@@ -190,7 +235,7 @@ hr
 # ─── Step 3 ─── Optional typedstream decode ───────────────────────────────
 log "[3] Attempting typedstream decode of attributedBody (and ec blobs in msi)..."
 if python3 -c 'import typedstream' 2>/dev/null; then
-  imu_decode_blobs "$WORK/ab.bin" "$WORK/msi.bin" "$SCRIPT_DIR/decode.py" 2>&1 | sed 's/^/    /' | tee -a "$LOG"
+  imu_decode_blobs "$AB" "$MSI" "$SCRIPT_DIR/decode.py" 2>&1 | sed 's/^/    /' | tee -a "$LOG" >&2
 else
   log "  python 'typedstream' not installed; install with: pip3 install --user typedstream"
 fi
@@ -201,6 +246,7 @@ log "[4] Searching chat.db-wal for pre-retract page images..."
 WAL="$WORK/chat.db-wal"
 if [[ ! -s "$WAL" ]]; then
   log "  WAL file empty or missing; skipping."
+  printf '[]\n' > "$WAL_JSON"
 else
   log "  WAL size: $(imu_stat_size "$WAL") bytes"
   PGSIZE=$(sqlite3 -readonly "$SNAP" "PRAGMA page_size;")
@@ -213,6 +259,7 @@ else
   log "  GUID occurrences in WAL: $(printf '%s\n' "$HITS" | wc -l | tr -d ' ')"
 
   WAL_RESULTS=$(imu_extract_from_wal "$WAL" "$GUID")
+  imu_extract_from_wal_json "$WAL" "$GUID" > "$WAL_JSON"
   : > "$WORK/wal-hits.txt"
   if [[ -z "$WAL_RESULTS" ]]; then
     log "  No pre-retract text found following any GUID occurrence."
@@ -233,7 +280,7 @@ log "[5] imessage-exporter cross-check..."
 EXP="$WORK/export"
 rm -rf "$EXP"
 if command -v imessage-exporter >/dev/null; then
-  if ! imessage-exporter -f txt -o "$EXP" -p "$SNAP" -c full 2>>"$LOG"; then
+  if ! imessage-exporter -f txt -o "$EXP" -p "$SNAP" -c full >/dev/null 2>>"$LOG"; then
     log "  exporter exited non-zero (often harmless if attachments dir is missing)"
   fi
   if [[ -d "$EXP" ]]; then
@@ -258,4 +305,8 @@ hr
 
 log "[done] Report: $LOG"
 log "Artifacts:"
-ls -la "$WORK" | sed 's/^/  /' | tee -a "$LOG"
+ls -la "$WORK" | sed 's/^/  /' | tee -a "$LOG" >&2
+
+if [[ "$JSON_MODE" == "1" ]]; then
+  json_report
+fi

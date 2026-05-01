@@ -22,6 +22,7 @@ chat.db-*
 iphone-sms.db
 wal-strings-*.txt
 wal-near-guid.txt
+wal-candidates.json
 exporter-hits.txt
 chat-search.tsv
 candidates.tsv

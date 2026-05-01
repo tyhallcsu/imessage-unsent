@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "ran_at": "2026-05-01T10:30:00Z",
+  "handle": "+15551234567",
+  "chat_rowid": 1,
+  "candidate": {
+    "rowid": 200,
+    "guid": "00000000-0000-0000-0000-000000000001",
+    "sent_at": "2026-04-04 06:53:20",
+    "edited_at": "2026-04-04 06:53:50",
+    "msi_otr_le": 15
+  },
+  "vectors": {
+    "msi": {
+      "hit": false,
+      "reason": "metadata only"
+    },
+    "attributedBody": {
+      "hit": false,
+      "reason": "0 bytes"
+    },
+    "wal": {
+      "hit": true,
+      "candidates": [
+        {
+          "offset": 3,
+          "length": 15,
+          "text_preview": "Recovered text!",
+          "text_b64": "UmVjb3ZlcmVkIHRleHQh"
+        }
+      ]
+    },
+    "exporter": {
+      "hit": false,
+      "reason": "not run or no recoverable text"
+    }
+  },
+  "recovered": {
+    "text_b64": "UmVjb3ZlcmVkIHRleHQh",
+    "length": 15,
+    "source": "wal",
+    "wal_offset": 3
+  }
+}
