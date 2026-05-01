@@ -18,6 +18,8 @@ chat.db
 chat.db-wal
 chat.db-shm
 chat.db-*
+!tests/fixtures/chat.db
+!tests/fixtures/chat.db-wal
 *.sms.db
 iphone-sms.db
 wal-strings-*.txt
