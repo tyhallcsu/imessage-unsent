@@ -28,3 +28,7 @@ imu_stat_mtime() {
     stat -c "%y" "$path"
   fi
 }
+
+imu_iso_utc() {
+  date -u +"%Y-%m-%dT%H:%M:%SZ"
+}

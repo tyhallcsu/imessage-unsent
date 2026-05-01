@@ -333,6 +333,9 @@ cd imessage-unsent
 # or
 ./scripts/recover.sh --handle 'someone@icloud.com'
 
+# Machine-readable output for automation
+./scripts/recover.sh --handle '+15551234567' --json
+
 # Read the report
 cat /tmp/imessage-recovery/report.txt
 
@@ -352,6 +355,7 @@ The script writes everything under `/tmp/imessage-recovery/` (override with `--w
 | `msi.bin` / `msi.xml`      | The retraction metadata plist                          |
 | `ab.bin`                   | The (usually empty) attributedBody BLOB                |
 | `wal-hits.txt`             | **Recovered text candidates from the WAL**             |
+| `wal-candidates.json`      | WAL candidates used to build `--json` output           |
 | `export/` (if installed)   | imessage-exporter output                               |
 
 ## Sanitized case study
