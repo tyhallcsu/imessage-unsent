@@ -7,6 +7,8 @@ final class WatcherDaemon {
   private let stopSemaphore = DispatchSemaphore(value: 0)
   private var heartbeatTimer: DispatchSourceTimer?
   private var signalSources: [DispatchSourceSignal] = []
+  private var walWatcher: FSWatcher?
+  private var lastWalSize: Int64 = 0
   private var stopped = false
 
   func run() throws {
@@ -16,6 +18,7 @@ final class WatcherDaemon {
     try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
 
     log("imu-watcher starting log_level=\(config.logLevel) data_dir=\(dataDir.path)")
+    try startWalWatcher()
     installSignalHandlers()
     startHeartbeat()
     stopSemaphore.wait()
@@ -56,12 +59,33 @@ final class WatcherDaemon {
     heartbeatTimer = timer
   }
 
+  private func startWalWatcher() throws {
+    let walURL = defaultMessagesWalURL()
+    lastWalSize = FSWatcher.fileSize(at: walURL)
+    let watcher = FSWatcher(walURL: walURL) { [weak self] size in
+      self?.logWalChange(size: size)
+    }
+
+    try watcher.start()
+    walWatcher = watcher
+    log("watching wal path=\(walURL.path) initial_size=\(lastWalSize)")
+  }
+
+  private func logWalChange(size: Int64) {
+    let delta = size - lastWalSize
+    lastWalSize = size
+    let deltaText = delta >= 0 ? "+\(delta)" : "\(delta)"
+    log("wal change size=\(size) delta=\(deltaText)")
+  }
+
   private func stop(reason: String) {
     guard !stopped else {
       return
     }
     stopped = true
     heartbeatTimer?.cancel()
+    walWatcher?.stop()
+    walWatcher = nil
     log("shutdown requested reason=\(reason)")
     stopSemaphore.signal()
   }
