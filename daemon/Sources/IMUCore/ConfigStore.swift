@@ -3,13 +3,16 @@ import Foundation
 public struct DaemonConfig: Equatable {
   public var logLevel: String
   public var dataDir: String
+  public var archiveRetention: Int
 
   public init(
     logLevel: String = "info",
-    dataDir: String = "~/Library/Application Support/imessage-unsent"
+    dataDir: String = "~/Library/Application Support/imessage-unsent",
+    archiveRetention: Int = 100
   ) {
     self.logLevel = logLevel
     self.dataDir = dataDir
+    self.archiveRetention = archiveRetention
   }
 }
 
@@ -51,6 +54,10 @@ public struct ConfigStore {
         config.logLevel = parseString(parts[1])
       case "data_dir":
         config.dataDir = parseString(parts[1])
+      case "archive_retention":
+        if let value = Int(parseString(parts[1])) {
+          config.archiveRetention = value
+        }
       default:
         continue
       }
