@@ -9,6 +9,7 @@ final class WatcherDaemon {
   private var signalSources: [DispatchSourceSignal] = []
   private var walWatcher: FSWatcher?
   private var detector: RetractionDetector?
+  private var archivePipeline: ArchivePipeline?
   private var lastWalSize: Int64 = 0
   private var stopped = false
 
@@ -17,6 +18,11 @@ final class WatcherDaemon {
     let config = try ConfigStore(url: configURL).load()
     let dataDir = expandTilde(config.dataDir)
     try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dataDir.path)
+    archivePipeline = ArchivePipeline(
+      archivesDir: dataDir.appendingPathComponent("archives", isDirectory: true),
+      retentionLimit: config.archiveRetention
+    )
 
     log("imu-watcher starting log_level=\(config.logLevel) data_dir=\(dataDir.path)")
     try startWalWatcher()
@@ -89,13 +95,24 @@ final class WatcherDaemon {
 
     do {
       let events = try detector.detect()
+      var processedEvents: [RetractionDetected] = []
       for event in events {
         log(
           "retraction detected rowid=\(event.rowid) guid=\(event.guid) " +
             "handle=\(event.handle) edited_at=\(event.editedAt)"
         )
+        do {
+          guard let archivePipeline else {
+            continue
+          }
+          let complete = try archivePipeline.archive(event: event)
+          log("recovery complete archive_dir=\(complete.archiveDir.path) recovered=\(complete.recovered)")
+          processedEvents.append(event)
+        } catch {
+          log("archive error rowid=\(event.rowid) error=\(error.localizedDescription)")
+        }
       }
-      try detector.markProcessed(events)
+      try detector.markProcessed(processedEvents)
     } catch {
       log("detector error=\(error.localizedDescription)")
     }
@@ -110,6 +127,7 @@ final class WatcherDaemon {
     walWatcher?.stop()
     walWatcher = nil
     detector = nil
+    archivePipeline = nil
     log("shutdown requested reason=\(reason)")
     stopSemaphore.signal()
   }
