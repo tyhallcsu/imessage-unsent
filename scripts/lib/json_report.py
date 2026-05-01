@@ -63,6 +63,16 @@ def read_wal_candidates(path: Path) -> list[dict[str, Any]]:
     return candidates
 
 
+def read_iphone_backup(path: Path) -> dict[str, Any]:
+    if not path.exists() or path.stat().st_size == 0:
+        return {"enabled": False, "hit": False, "reason": "not requested"}
+    try:
+        raw = json.loads(path.read_text())
+    except Exception:
+        return {"enabled": True, "hit": False, "reason": "could not parse iphone-backup.json"}
+    return raw if isinstance(raw, dict) else {"enabled": True, "hit": False, "reason": "invalid iphone-backup.json"}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ran-at", required=True)
@@ -75,12 +85,29 @@ def main() -> int:
     parser.add_argument("--msi", type=Path, required=True)
     parser.add_argument("--ab", type=Path, required=True)
     parser.add_argument("--wal-json", type=Path, required=True)
+    parser.add_argument("--iphone-json", type=Path, required=True)
     args = parser.parse_args()
 
     wal_candidates = read_wal_candidates(args.wal_json)
     first_wal = wal_candidates[0] if wal_candidates else None
+    iphone_backup = read_iphone_backup(args.iphone_json)
+    iphone_hit = bool(iphone_backup.get("hit"))
     ab_size = args.ab.stat().st_size if args.ab.exists() else 0
     msi_size = args.msi.stat().st_size if args.msi.exists() else 0
+
+    recovered = {
+        "text_b64": first_wal.get("text_b64") if first_wal else None,
+        "length": first_wal.get("length") if first_wal else None,
+        "source": "wal" if first_wal else None,
+        "wal_offset": first_wal.get("offset") if first_wal else None,
+    }
+    if not first_wal and iphone_hit:
+        recovered = {
+            "text_b64": iphone_backup.get("text_b64"),
+            "length": iphone_backup.get("length"),
+            "source": "iphone_backup",
+            "wal_offset": None,
+        }
 
     payload = {
         "schema_version": 1,
@@ -111,13 +138,18 @@ def main() -> int:
                 "hit": False,
                 "reason": "not run or no recoverable text",
             },
+            "iphone_backup": {
+                "enabled": bool(iphone_backup.get("enabled")),
+                "hit": iphone_hit,
+                "reason": iphone_backup.get("reason"),
+                "backup": iphone_backup.get("backup"),
+                "candidate": iphone_backup.get("candidate"),
+                "text_b64": iphone_backup.get("text_b64") if iphone_hit else None,
+                "length": iphone_backup.get("length") if iphone_hit else None,
+                "checked": iphone_backup.get("checked", []),
+            },
         },
-        "recovered": {
-            "text_b64": first_wal.get("text_b64") if first_wal else None,
-            "length": first_wal.get("length") if first_wal else None,
-            "source": "wal" if first_wal else None,
-            "wal_offset": first_wal.get("offset") if first_wal else None,
-        },
+        "recovered": recovered,
     }
 
     print(json.dumps(payload, ensure_ascii=False))
