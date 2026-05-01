@@ -387,4 +387,4 @@ The recovered text itself may also be subject to legal protections (e.g., if it 
 
 ## License
 
-[MIT](LICENSE) © 2026 Tyler Hall
+[MIT](LICENSE) © 2026 sharmanhall
