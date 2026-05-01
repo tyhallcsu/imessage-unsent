@@ -1,13 +1,17 @@
 <div align="center">
 
+<img src="./assets/icon.svg" alt="imessage-unsent icon" width="96">
+
 # imessage-unsent
 
 **Recover the original text of an iMessage another user "unsent" on macOS — by reading the SQLite WAL before it gets checkpointed.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform: macOS 14+](https://img.shields.io/badge/Platform-macOS%2014%2B-black.svg)](#prerequisites)
+[![Verified: macOS 15 / Darwin 24.x](https://img.shields.io/badge/Verified-macOS%2015%20%2F%20Darwin%2024.x-black.svg)](#prerequisites)
 [![Stack: bash + python](https://img.shields.io/badge/Stack-bash%20%2B%20python3-yellow.svg)](#usage)
 [![Status: tactical](https://img.shields.io/badge/Status-tactical-orange.svg)](#limitations)
+
+<img src="./assets/hero.svg" alt="imessage-unsent project artwork" width="920">
 
 </div>
 
@@ -19,7 +23,7 @@ But SQLite doesn't overwrite pages in place — it writes new page images to a *
 
 | | |
 |---|---|
-| **Platform** | macOS 14+ (verified on Darwin 24.x / Sequoia) |
+| **Platform** | macOS 15 / Sequoia (verified on Darwin 24.x) |
 | **Languages** | bash, python3 |
 | **Built-in deps** | `sqlite3`, `plutil` |
 | **Optional deps** | [`typedstream`](https://pypi.org/project/typedstream/) (pip), [`imessage-exporter`](https://github.com/ReagentX/imessage-exporter) (cargo) |
@@ -32,6 +36,7 @@ But SQLite doesn't overwrite pages in place — it writes new page images to a *
 - [How iMessage retraction actually works](#how-imessage-retraction-actually-works)
 - [chat.db schema deep-dive](#chatdb-schema-deep-dive)
 - [The six recovery vectors](#the-six-recovery-vectors)
+- [Recovery workflow](#recovery-workflow)
 - [Why the WAL vector works (byte-level)](#why-the-wal-vector-works-byte-level)
 - [Usage](#usage)
 - [Sanitized case study](#sanitized-case-study)
@@ -141,7 +146,7 @@ SELECT c.ROWID
 FROM chat c
 JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
 JOIN handle h            ON h.ROWID     = chj.handle_id
-WHERE h.id = '+1XXXXXXXXXX' AND c.chat_identifier = '+1XXXXXXXXXX'
+WHERE h.id = '+15551234567' AND c.chat_identifier = '+15551234567'
 ORDER BY c.ROWID LIMIT 1;
 ```
 
@@ -245,6 +250,12 @@ grep -RIn "$GUID" export/
 
 </details>
 
+## Recovery workflow
+
+<img src="./assets/recovery-flow.svg" alt="Five-step imessage-unsent workflow from snapshot to WAL recovery and cross-check" width="100%">
+
+This diagram mirrors `scripts/recover.sh`: snapshot the live Messages database family, resolve the target handle and candidate row, dump the retraction metadata, scan `chat.db-wal` for GUID-adjacent pre-retract text, then cross-check length and exporter output when available.
+
 ## Why the WAL vector works (byte-level)
 
 SQLite in **WAL journaling mode** (the default for `chat.db`) writes new transactions to `chat.db-wal` instead of mutating the main file in place. The WAL has this structure:
@@ -318,7 +329,7 @@ cd imessage-unsent
 #   System Settings → Privacy & Security → Full Disk Access → +
 
 # Run against the contact's phone (E.164) or Apple ID email
-./scripts/recover.sh --handle '+1XXXXXXXXXX'
+./scripts/recover.sh --handle '+15551234567'
 # or
 ./scripts/recover.sh --handle 'someone@icloud.com'
 
