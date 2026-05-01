@@ -1,13 +1,34 @@
+<div align="center">
+
 # imessage-unsent
 
-> Recover the original text of an iMessage another user "unsent" on macOS — by reading the SQLite WAL before it gets checkpointed.
+**Recover the original text of an iMessage another user "unsent" on macOS — by reading the SQLite WAL before it gets checkpointed.**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform: macOS 14+](https://img.shields.io/badge/Platform-macOS%2014%2B-black.svg)](#prerequisites)
+[![Stack: bash + python](https://img.shields.io/badge/Stack-bash%20%2B%20python3-yellow.svg)](#usage)
+[![Status: tactical](https://img.shields.io/badge/Status-tactical-orange.svg)](#limitations)
+
+</div>
+
+---
 
 When someone unsends an iMessage on iOS 16+ / macOS 13+, Apple's client wipes the message body from `~/Library/Messages/chat.db` on both ends within ~2 minutes. The `text` and `attributedBody` columns are nulled; `message_summary_info` keeps only metadata (length, retracted-part indices). Everything you'd want is gone from the canonical row.
 
 But SQLite doesn't overwrite pages in place — it writes new page images to a **write-ahead log** (`chat.db-wal`) and only later checkpoints them into the main file. For a window of seconds-to-hours after the unsend, the **pre-retract page image is still sitting in the WAL**, with the original UTF-8 text inline. This repo's script extracts it.
 
+| | |
+|---|---|
+| **Platform** | macOS 14+ (verified on Darwin 24.x / Sequoia) |
+| **Languages** | bash, python3 |
+| **Built-in deps** | `sqlite3`, `plutil` |
+| **Optional deps** | [`typedstream`](https://pypi.org/project/typedstream/) (pip), [`imessage-exporter`](https://github.com/ReagentX/imessage-exporter) (cargo) |
+| **Permission required** | Full Disk Access for your terminal |
+| **License** | [MIT](LICENSE) |
+
 ## Table of contents
 
+- [macOS Sequoia gotcha](#macos-sequoia-24x-gotcha--read-this-first)
 - [How iMessage retraction actually works](#how-imessage-retraction-actually-works)
 - [chat.db schema deep-dive](#chatdb-schema-deep-dive)
 - [The six recovery vectors](#the-six-recovery-vectors)
@@ -20,15 +41,14 @@ But SQLite doesn't overwrite pages in place — it writes new page images to a *
 
 ---
 
-## ⚠️ macOS Sequoia (24.x) gotcha — read this first
+## macOS Sequoia (24.x) gotcha — read this first
 
-The `message` table in `chat.db` has a column called `date_retracted` that **looks like** the right place to detect unsends. **It is not used on macOS Sequoia (Darwin 24.x).** Apple records unsends in:
-
-```sql
-m.date_edited != 0  AND  m.is_empty = 1
-```
-
-If your forensic tool filters on `date_retracted != 0` (which is the obvious-but-wrong column), it will miss every retraction. The schema is misleading. Empirical truth is: unsend = "edited to empty".
+> [!WARNING]
+> The `message` table in `chat.db` has a column called `date_retracted` that **looks like** the right place to detect unsends. **It is not used on macOS Sequoia (Darwin 24.x).** Apple records unsends via:
+>
+> `m.date_edited != 0  AND  m.is_empty = 1`
+>
+> If your forensic tool filters on `date_retracted != 0` (the obvious-but-wrong column), it will silently miss every retraction. The schema is misleading. Empirical truth is: **unsend = "edited to empty"**.
 
 ## How iMessage retraction actually works
 
@@ -63,11 +83,13 @@ The `message_summary_info` BLOB is a binary plist that records *what was retract
 
 So the metadata tells you "a 95-character user-sent text was retracted in full" — but not what those 95 characters were. The bytes are scrubbed from the row.
 
-For *edited* messages (Apple's other "edit message" feature), this same plist gains an `ec` (edit chronology) key with prior versions — including their typedstream blobs. Edits preserve history; retractions do not.
+> [!NOTE]
+> For *edited* messages (Apple's other "edit message" feature), this same plist gains an `ec` (edit chronology) key with prior versions — including their typedstream blobs. **Edits preserve history; retractions do not.**
 
 ## chat.db schema deep-dive
 
-Relevant columns of the `message` table on macOS Sequoia (Darwin 24.6, schema observed verbatim):
+<details>
+<summary><b>Relevant columns of <code>message</code> on Darwin 24.6 (click to expand)</b></summary>
 
 | Column                  | Type    | Purpose                                              |
 | ----------------------- | ------- | ---------------------------------------------------- |
@@ -90,6 +112,8 @@ Relevant columns of the `message` table on macOS Sequoia (Darwin 24.6, schema ob
 | `payload_data`          | BLOB    | App-specific (sticker / link preview / business chat) |
 | `associated_message_guid` | TEXT  | For tapbacks/replies, points at the parent           |
 
+</details>
+
 Other tables you'll need:
 
 - `handle (ROWID, id, country, service, ...)` — `handle.id` is the phone number (E.164) or Apple ID email.
@@ -105,11 +129,12 @@ Other tables you'll need:
 datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime')
 ```
 
-Older versions of macOS (< 10.13) stored `date` as Apple-epoch *seconds* not nanoseconds — irrelevant for current builds, but watch for it on archived databases.
+> [!NOTE]
+> Older versions of macOS (< 10.13) stored `date` as Apple-epoch *seconds* not nanoseconds — irrelevant for current builds, but watch for it on archived databases.
 
 ### Why `display_name` is a trap
 
-On 1:1 conversations `chat.display_name` is `NULL`. The contact name shown in Messages.app ("UBER Leslie ...") is resolved on the fly from macOS Contacts (`Contacts.app` / AddressBook framework), **not** stored in `chat.db`. Search by handle:
+On 1:1 conversations `chat.display_name` is `NULL`. The contact name shown in Messages.app is resolved on the fly from macOS Contacts (`Contacts.app` / AddressBook framework), **not** stored in `chat.db`. Search by handle:
 
 ```sql
 SELECT c.ROWID
@@ -209,13 +234,16 @@ grep -RIn "$GUID" export/
 
 ### Vector 6 — external backups
 
-If Vectors 0–5 fail and you genuinely need the text:
+<details>
+<summary>If Vectors 0–5 fail and you genuinely need the text (click to expand)</summary>
 
 - **Time Machine** — `tmutil listbackups`. Mount an older backup and pull a `chat.db` from before the unsend. Most reliable when configured.
 - **APFS local snapshots** — `tmutil listlocalsnapshots /`. Mount and copy.
 - **iPhone backup (encrypted Manifest.db)** — `~/Library/Application Support/MobileSync/Backup/<UUID>/3d/3d0d7e5fb2ce288813306e4d4636395e047a3d28` is the iPhone's `sms.db`. If the phone synced after the message arrived but before the unsend propagated, it's intact there.
 - **iMazing / iExplorer / 3uTools** — third-party iPhone backup managers store at their own paths.
 - **iCloud Backup** — recoverable only via full restore, generally not worth it for one message.
+
+</details>
 
 ## Why the WAL vector works (byte-level)
 
@@ -254,8 +282,9 @@ SQLite stores rows as records on B-tree pages. The `message` row layout in seria
 ```
 
 Column types are encoded as varints; for our purposes the relevant column values are:
-- `guid` — 36-byte ASCII string (TEXT serial type = 2*N + 13 where N = 36)
-- `text` — variable-length UTF-8 (TEXT serial type = 2*N + 13)
+
+- `guid` — 36-byte ASCII string (TEXT serial type = `2*N + 13` where N = 36)
+- `text` — variable-length UTF-8 (TEXT serial type = `2*N + 13`)
 - `attributedBody` — BLOB starting with `\x04\x0bstreamtyped` (typedstream magic)
 
 So immediately after the GUID's 36 ASCII bytes, the `text` column's bytes are inline UTF-8. The `attributedBody` BLOB begins at `\x04\x0bstreamtyped`. Therefore:
@@ -276,7 +305,8 @@ text  = after[:end].lstrip(b'\x00\x01\x02\x03').decode('utf-8')
 
 Multiple GUID hits = multiple page-image versions. Frames where `text` is empty correspond to the post-retraction state; frames where `text` contains real bytes are pre-retraction.
 
-Length cross-check: the recovered string's `len(text)` should match `otr.0.le` from the `message_summary_info` plist. If they match exactly, you have the right bytes.
+> [!TIP]
+> **Length cross-check.** The recovered string's `len(text)` should match `otr.0.le` from the `message_summary_info` plist. If they match exactly, you have the right bytes.
 
 ## Usage
 
@@ -319,13 +349,9 @@ A live recovery on macOS 24.6 (April 2026):
 
 1. **Pre-flight.** `chat.db` 869 MB, `chat.db-wal` 3.3 MB (~812 frames at 4 KB pages). No Time Machine configured. WAL not yet auto-checkpointed.
 2. **Vector 1 (locate).** Searching `chat.display_name` for the contact's name returned nothing (1:1 chat, NULL display_name). Pivoted to handle lookup; found the candidate row. `is_empty=1`, `text` empty, `attributedBody` 0 bytes, `message_summary_info` 101 bytes, `date_edited` 30 seconds after `date`.
-3. **Vector 2 (msi).** Decoded plist:
-   ```
-   { amc=0, otr={ 0={le=95, lo=0} }, rp=[0], ust=true }
-   ```
-   Confirmed: a 95-character user-sent text in part 0 was retracted in full. Original bytes not preserved here.
+3. **Vector 2 (msi).** Decoded plist: `{ amc=0, otr={ 0={le=95, lo=0} }, rp=[0], ust=true }`. Confirmed: a 95-character user-sent text in part 0 was retracted in full. Original bytes not preserved here.
 4. **Vector 3 (attributedBody).** Empty. Skipped.
-5. **Vector 4 (WAL).** The candidate's GUID appeared at 20 byte offsets in `chat.db-wal`. At 2 of those offsets the bytes immediately following the GUID decoded as a 95-character UTF-8 string (containing `\xe2\x80\x99` for the typographic apostrophes iOS auto-correct produces), terminating exactly at the `\x04\x0bstreamtyped` typedstream marker. Length matched `otr.0.le=95` exactly. **Recovered.**
+5. **Vector 4 (WAL).** The candidate's GUID appeared at 20 byte offsets in `chat.db-wal`. At 2 of those offsets the bytes immediately following the GUID decoded as a 95-character UTF-8 string (containing `\xe2\x80\x99` for the typographic apostrophes iOS auto-correct produces), terminating exactly at the `\x04\x0bstreamtyped` typedstream marker. **Length matched `otr.0.le=95` exactly. Recovered.**
 6. **Vector 5 (imessage-exporter).** Confirmed the message as "Unsent" but did not surface text — as expected.
 7. **Vector 6 (backups).** Not needed.
 
@@ -351,7 +377,7 @@ Total time from realizing the message was unsent → recovered text: ~25 minutes
 | `typedstream` (pip)   | optional  | `pip3 install --user typedstream`             |
 | `imessage-exporter`   | optional  | `cargo install imessage-exporter`             |
 
-Tested on macOS 14 (Sonoma) and macOS 15 (Sequoia, Darwin 24.x). The schema and behaviors change between major macOS versions; if you're on a different one, validate the column list and the `date_edited`/`is_empty` semantics first.
+Verified on macOS 15 (Sequoia, Darwin 24.x). The retraction feature itself shipped in macOS 13 / iOS 16, so the schema-level technique is expected to apply from macOS 13+ — but column semantics (specifically the `date_retracted` vs `date_edited` distinction documented above) have only been confirmed on Darwin 24.x in this codebase. Validate before relying on this on earlier macOS versions.
 
 ## Privacy and legal
 
@@ -361,4 +387,4 @@ The recovered text itself may also be subject to legal protections (e.g., if it 
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) © 2026 Tyler Hall
