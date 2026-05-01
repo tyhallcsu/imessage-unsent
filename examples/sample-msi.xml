@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Sample message_summary_info (sanitized) for a fully unsent inbound iMessage.
+
+  Source: ~/Library/Messages/chat.db, message.message_summary_info column,
+  decoded via `plutil -convert xml1`.
+
+  Read the keys:
+    amc      Associated message count (0 here = no associated reactions/edits beyond the retraction itself).
+    otr      Original text ranges keyed by part index. Part "0" had original
+             length 95 chars (le=95) at offset 0 (lo=0). Apple keeps the
+             *length* as forensic metadata but discards the actual *bytes*.
+    rp       Retracted parts: array of part indices that were unsent.
+             [0] = part 0 was retracted in full.
+    ust      Boolean flag — user-sent text was the retracted content (vs. an
+             attachment, sticker, or balloon plugin).
+
+  This is what the chat.db row looks like AFTER retraction. The original
+  text and attributedBody columns are wiped to NULL on the same row. The
+  only place the original text can survive is the WAL (chat.db-wal) page
+  image written before the retraction UPDATE was applied.
+-->
+<plist version="1.0">
+<dict>
+	<key>amc</key>
+	<integer>0</integer>
+	<key>otr</key>
+	<dict>
+		<key>0</key>
+		<dict>
+			<key>le</key>
+			<integer>95</integer>
+			<key>lo</key>
+			<integer>0</integer>
+		</dict>
+	</dict>
+	<key>rp</key>
+	<array>
+		<integer>0</integer>
+	</array>
+	<key>ust</key>
+	<true/>
+</dict>
+</plist>

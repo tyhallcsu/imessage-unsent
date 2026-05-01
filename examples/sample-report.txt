@@ -1,0 +1,74 @@
+================================================================
+imessage-unsent recovery report (sanitized example)
+================================================================
+handle:    +1XXXXXXXXXX        # E.164 phone of the contact who unsent
+live dir:  /Users/example/Library/Messages
+work dir:  /tmp/imessage-recovery
+================================================================
+[0] Quitting Messages.app and snapshotting chat.db family...
+  copied chat.db      (869552128 bytes)
+  copied chat.db-wal  (3345472 bytes)
+  copied chat.db-shm  (32768 bytes)
+================================================================
+[1] Resolving handle '+1XXXXXXXXXX' → handle.ROWID...
+  -> handle.ROWID = NNNN
+[1b] Locating 1:1 chat for that handle...
+  -> chat.ROWID = MMMM
+[1c] Searching for inbound retracted messages (date_edited != 0 AND is_empty = 1)...
+ROWID    guid                                    sent_at              edited_at            is_from_me  is_empty  ab_len  msi_len
+NNNNNN   XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX    2026-04-30 21:45:37  2026-04-30 21:46:07  0           1                 101
+  -> top candidate ROWID: NNNNNN
+  -> candidate GUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+================================================================
+[2] Extracting BLOBs for ROWID NNNNNN...
+  msi.bin: 101 bytes
+  msi.xml written
+  --- plutil -p msi.bin ---
+    {
+      "amc" => 0
+      "otr" => {
+        "0" => {
+          "le" => 95
+          "lo" => 0
+        }
+      }
+      "rp" => [
+        0 => 0
+      ]
+      "ust" => 1
+    }
+  -------------------------
+  Note: For *fully unsent* messages this plist contains metadata only:
+    rp = retracted parts, otr.0.le = original char length, ust = user-sent text marker.
+    The original text is NOT preserved here.
+  ab.bin:  empty (Apple wipes attributedBody on full retraction)
+================================================================
+[3] Attempting typedstream decode of attributedBody (and ec blobs in msi)...
+    [attributedBody] /tmp/imessage-recovery/ab.bin
+      empty or missing (expected for fully retracted message)
+
+    [message_summary_info] /tmp/imessage-recovery/msi.bin
+      top-level keys: ['amc', 'otr', 'rp', 'ust']
+      rp (retracted parts): [0]
+      otr (original text ranges): {'0': {'le': 95, 'lo': 0}}
+      ust (user-sent text marker): True
+      ec (edit chronology): ABSENT — full retraction does not preserve text here
+================================================================
+[4] Searching chat.db-wal for pre-retract page images...
+  WAL size: 3345472 bytes
+  page_size = 4096  approx_frames = 812
+  searching for GUID byte string...
+  GUID occurrences in WAL: 20
+    WAL_OFFSET 2399663  LEN 95  TEXT: '<recovered text redacted in this sample>'
+    WAL_OFFSET 2432621  LEN 95  TEXT: '<same recovered text — second pre-retract page image>'
+================================================================
+[5] imessage-exporter cross-check...
+  exporter-hits.txt: K lines  (notes the message as "Unsent" with no surfaced text)
+================================================================
+[6] Other recovery vectors to consider manually:
+  - Time Machine snapshots of chat.db (tmutil listbackups, then mount)
+  - APFS local snapshots (tmutil listlocalsnapshots /)
+  - iPhone backups in ~/Library/Application Support/MobileSync/Backup/
+  - iMazing / iExplorer / 3uTools backups (paths vary)
+================================================================
+[done] Report: /tmp/imessage-recovery/report.txt
