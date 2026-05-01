@@ -43,5 +43,7 @@ Grant Full Disk Access to this installed binary:
 Recovery scripts installed to:
   ~/Library/Application Support/imessage-unsent/scripts
 
+The first recovered message may trigger a macOS notification permission prompt.
+
 System Settings > Privacy & Security > Full Disk Access
 MSG
