@@ -19,4 +19,4 @@ Modular recovery primitives sourced by `scripts/recover.sh`. This directory impl
 - All paths absolute. Callers pass paths in; libs never assume `~/Library/Messages/`.
 - Output to stdout; logs/diagnostics to stderr; exit codes only for hard errors.
 
-`scripts/recover.sh` remains the user-facing driver and orchestrates the Vector 0–6 flow described in [README.md](../../README.md#the-six-recovery-vectors). JSON output, fixtures, and end-to-end tests are intentionally left to issues #3, #4, and #5.
+`scripts/recover.sh` remains the user-facing driver and orchestrates the Vector 0–6 flow described in [README.md](../../README.md#the-six-recovery-vectors). JSON output is layered on top of these primitives; fixtures and end-to-end tests are intentionally left to issues #4 and #5.

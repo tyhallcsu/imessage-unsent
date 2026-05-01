@@ -24,3 +24,11 @@ imu_extract_from_wal() {
   lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   python3 "$lib_dir/wal_extract.py" "$wal_path" "$guid"
 }
+
+imu_extract_from_wal_json() {
+  local wal_path="${1:?usage: imu_extract_from_wal_json <wal_path> <guid>}"
+  local guid="${2:?usage: imu_extract_from_wal_json <wal_path> <guid>}"
+  local lib_dir
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  python3 "$lib_dir/wal_extract.py" --json "$wal_path" "$guid"
+}
