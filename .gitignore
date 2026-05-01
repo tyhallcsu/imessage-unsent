@@ -52,3 +52,7 @@ macos-how-to-find-tingly-honey.md
 
 # Node (in case)
 node_modules/
+
+# SwiftPM / local build output
+.build/
+dist/
