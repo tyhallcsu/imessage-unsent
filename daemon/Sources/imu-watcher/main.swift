@@ -10,6 +10,7 @@ final class WatcherDaemon {
   private var walWatcher: FSWatcher?
   private var detector: RetractionDetector?
   private var archivePipeline: ArchivePipeline?
+  private var notifier: RecoveryNotifier?
   private var lastWalSize: Int64 = 0
   private var stopped = false
 
@@ -23,6 +24,7 @@ final class WatcherDaemon {
       archivesDir: dataDir.appendingPathComponent("archives", isDirectory: true),
       retentionLimit: config.archiveRetention
     )
+    notifier = RecoveryNotifier(config: config.notifications)
 
     log("imu-watcher starting log_level=\(config.logLevel) data_dir=\(dataDir.path)")
     try startWalWatcher()
@@ -107,6 +109,7 @@ final class WatcherDaemon {
           }
           let complete = try archivePipeline.archive(event: event)
           log("recovery complete archive_dir=\(complete.archiveDir.path) recovered=\(complete.recovered)")
+          notifier?.notify(complete)
           processedEvents.append(event)
         } catch {
           log("archive error rowid=\(event.rowid) error=\(error.localizedDescription)")
@@ -128,6 +131,7 @@ final class WatcherDaemon {
     walWatcher = nil
     detector = nil
     archivePipeline = nil
+    notifier = nil
     log("shutdown requested reason=\(reason)")
     stopSemaphore.signal()
   }
