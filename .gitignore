@@ -1,0 +1,50 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Recovery work directory (live data — never commit)
+imessage-recovery/
+/tmp/imessage-recovery/
+
+# Sensitive recovery artifacts (never commit even if accidentally placed in repo)
+recovered.txt
+report.txt
+msi.bin
+msi.xml
+ab.bin
+chat.db
+chat.db-wal
+chat.db-shm
+chat.db-*
+*.sms.db
+iphone-sms.db
+wal-strings-*.txt
+wal-near-guid.txt
+exporter-hits.txt
+chat-search.tsv
+candidates.tsv
+export/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Auto-generated session/plan files (Claude Code working artifacts) — never commit
+CHAT.md
+macos-how-to-find-tingly-honey.md
+*_handoff.md
+.claude/
+
+# Node (in case)
+node_modules/
