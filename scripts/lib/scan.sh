@@ -71,6 +71,69 @@ ORDER BY m.date DESC LIMIT 10;
 SQL
 }
 
+imu_since_cutoff_ns() {
+  local since="${1:?usage: imu_since_cutoff_ns <duration>}"
+  python3 - "$since" <<'PY'
+import re
+import sys
+import time
+
+duration = sys.argv[1]
+match = re.fullmatch(r"([0-9]+)([smhd])", duration)
+if not match:
+    print("ERROR: --since must look like 60s, 15m, 24h, or 7d", file=sys.stderr)
+    raise SystemExit(1)
+
+value = int(match.group(1))
+unit = match.group(2)
+seconds = value * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+apple_epoch_offset = 978_307_200
+cutoff = int((time.time() - seconds - apple_epoch_offset) * 1_000_000_000)
+print(cutoff)
+PY
+}
+
+imu_candidate_handles() {
+  local snap_db="${1:?usage: imu_candidate_handles <snap_db> <since_ns>}"
+  local since_ns="${2:?usage: imu_candidate_handles <snap_db> <since_ns>}"
+
+  sqlite3 -readonly "$snap_db" "
+    SELECT DISTINCT h.id
+    FROM message m
+    JOIN handle h ON h.ROWID = m.handle_id
+    WHERE m.is_from_me = 0
+      AND m.date_edited != 0
+      AND m.is_empty = 1
+      AND m.date_edited >= $since_ns
+    ORDER BY h.id;
+  "
+}
+
+imu_batch_candidates_for_handle() {
+  local snap_db="${1:?usage: imu_batch_candidates_for_handle <snap_db> <since_ns> <handle>}"
+  local since_ns="${2:?usage: imu_batch_candidates_for_handle <snap_db> <since_ns> <handle>}"
+  local handle="${3:?usage: imu_batch_candidates_for_handle <snap_db> <since_ns> <handle>}"
+  local safe_handle
+  safe_handle=$(imu_sql_escape "$handle")
+
+  sqlite3 -readonly -separator $'\t' "$snap_db" "
+    SELECT h.id,
+           m.ROWID,
+           m.guid,
+           datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime') AS sent_at,
+           datetime(m.date_edited/1000000000 + 978307200, 'unixepoch', 'localtime') AS edited_at,
+           m.date_edited
+    FROM message m
+    JOIN handle h ON h.ROWID = m.handle_id
+    WHERE h.id = '$safe_handle'
+      AND m.is_from_me = 0
+      AND m.date_edited != 0
+      AND m.is_empty = 1
+      AND m.date_edited >= $since_ns
+    ORDER BY m.date_edited DESC;
+  "
+}
+
 # imu_find_candidate <snap_db> <handle>
 #
 # Resolves <handle> (E.164 phone or Apple ID email) to the most recent inbound

@@ -27,3 +27,12 @@ install_fake_osascript() {
   printf '#!/usr/bin/env bash\nexit 0\n' > "$bin_dir/osascript"
   chmod +x "$bin_dir/osascript"
 }
+
+setup_fixture_recover_env() {
+  local root="${1:?usage: setup_fixture_recover_env <root>}"
+  IMU_TEST_HOME="$root/home"
+  IMU_TEST_WORK="$root/work"
+  IMU_TEST_BIN="$root/bin"
+  copy_fixture_messages "$IMU_TEST_HOME/Library/Messages"
+  install_fake_osascript "$IMU_TEST_BIN"
+}
