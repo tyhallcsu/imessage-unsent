@@ -336,6 +336,15 @@ cd imessage-unsent
 # Machine-readable output for automation
 ./scripts/recover.sh --handle '+15551234567' --json
 
+# Batch scan all handles with recent inbound retractions
+./scripts/recover.sh --all-handles --since 24h --json
+
+# Batch scan a curated list, one handle per line
+./scripts/recover.sh --handles-file handles.txt --since 7d --json
+
+# Preview batch scope without quitting Messages or snapshotting chat.db
+./scripts/recover.sh --handles-file handles.txt --dry-run
+
 # Read the report
 cat /tmp/imessage-recovery/report.txt
 
@@ -352,6 +361,8 @@ The script writes everything under `/tmp/imessage-recovery/` (override with `--w
 | `report.txt`               | Full vector-by-vector log                              |
 | `chat.db`, `chat.db-wal`, `chat.db-shm` | Forensic snapshot                         |
 | `candidates.tsv`           | Top 10 unsent candidates in the chat                   |
+| `batch-handles.txt` / `batch-results.tsv` | Batch-mode scan inputs/results          |
+| `batch-state.tsv`          | Batch-mode 60 second rate-limit state                  |
 | `msi.bin` / `msi.xml`      | The retraction metadata plist                          |
 | `ab.bin`                   | The (usually empty) attributedBody BLOB                |
 | `wal-hits.txt`             | **Recovered text candidates from the WAL**             |

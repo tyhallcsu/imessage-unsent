@@ -11,6 +11,9 @@
 #   ./recover.sh --handle '+1...' --rowid 123   # skip auto-detect; force ROWID
 #   ./recover.sh --handle '+1...' --work /custom/dir
 #   ./recover.sh --handle '+1...' --json       # emit machine-readable JSON on stdout
+#   ./recover.sh --all-handles --since 24h --json
+#   ./recover.sh --handles-file handles.txt --since 7d --json
+#   ./recover.sh --handles-file handles.txt --dry-run
 #
 # Prerequisites:
 #   - Full Disk Access granted to your terminal (System Settings → Privacy & Security → Full Disk Access)
@@ -43,10 +46,14 @@ source "$LIB_DIR/decode.sh"
 
 # ─── arg parsing ───────────────────────────────────────────────────────────
 HANDLE=""
+HANDLES_FILE=""
+ALL_HANDLES=0
 ROWID=""
 WORK="/tmp/imessage-recovery"
 LIVE="$HOME/Library/Messages"
 JSON_MODE=0
+SINCE="24h"
+DRY_RUN=0
 
 usage() {
   sed -n '2,30p' "$0"
@@ -56,22 +63,83 @@ usage() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --handle) HANDLE="$2"; shift 2 ;;
+    --handles-file) HANDLES_FILE="$2"; shift 2 ;;
+    --all-handles) ALL_HANDLES=1; shift ;;
     --rowid)  ROWID="$2";  shift 2 ;;
     --work)   WORK="$2";   shift 2 ;;
     --json)   JSON_MODE=1; shift ;;
+    --since)  SINCE="$2";  shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "unknown arg: $1" >&2; usage 1 ;;
   esac
 done
 
-if [[ -z "$HANDLE" ]]; then
-  echo "ERROR: --handle is required (phone number in E.164 format or Apple ID email)" >&2
+MODE_COUNT=0
+[[ -n "$HANDLE" ]] && MODE_COUNT=$((MODE_COUNT + 1))
+[[ -n "$HANDLES_FILE" ]] && MODE_COUNT=$((MODE_COUNT + 1))
+[[ "$ALL_HANDLES" == "1" ]] && MODE_COUNT=$((MODE_COUNT + 1))
+BATCH_MODE=0
+if [[ -n "$HANDLES_FILE" || "$ALL_HANDLES" == "1" ]]; then
+  BATCH_MODE=1
+fi
+
+if [[ "$MODE_COUNT" -ne 1 ]]; then
+  echo "ERROR: choose exactly one of --handle, --handles-file, or --all-handles" >&2
   usage 1
 fi
 
-if [[ -n "$ROWID" && ! "$ROWID" =~ ^[0-9]+$ ]]; then
+if [[ "$BATCH_MODE" == "0" && "$DRY_RUN" == "1" ]]; then
+  echo "ERROR: --dry-run is only supported with --handles-file or --all-handles" >&2
+  exit 1
+fi
+
+if [[ "$BATCH_MODE" == "0" && -n "$ROWID" && ! "$ROWID" =~ ^[0-9]+$ ]]; then
   echo "ERROR: --rowid must be numeric" >&2
   exit 1
+fi
+
+if [[ "$BATCH_MODE" == "1" && -n "$ROWID" ]]; then
+  echo "ERROR: --rowid is only supported with --handle" >&2
+  exit 1
+fi
+
+if [[ -n "$HANDLES_FILE" && ! -f "$HANDLES_FILE" ]]; then
+  echo "ERROR: --handles-file does not exist: $HANDLES_FILE" >&2
+  exit 1
+fi
+
+if [[ "$BATCH_MODE" == "1" ]]; then
+  imu_since_cutoff_ns "$SINCE" >/dev/null || exit 1
+fi
+
+if [[ "$DRY_RUN" == "1" ]]; then
+  if [[ "$JSON_MODE" == "1" ]]; then
+    python3 - "$ALL_HANDLES" "$HANDLES_FILE" "$SINCE" <<'PY'
+import json
+import sys
+
+all_handles = sys.argv[1] == "1"
+handles_file = sys.argv[2]
+since = sys.argv[3]
+if all_handles:
+    payload = [{"handle": None, "dry_run": True, "scan": "all-handles", "since": since, "candidates": []}]
+else:
+    handles = [
+        line.strip()
+        for line in open(handles_file)
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    payload = [{"handle": handle, "dry_run": True, "since": since, "candidates": []} for handle in handles]
+print(json.dumps(payload, ensure_ascii=False))
+PY
+  elif [[ "$ALL_HANDLES" == "1" ]]; then
+    printf '[dry-run] would scan all handles in %s since %s\n' "$LIVE" "$SINCE"
+  else
+    printf '[dry-run] would scan handles from %s since %s\n' "$HANDLES_FILE" "$SINCE"
+    awk 'NF && $1 !~ /^#/ {print "  " $0}' "$HANDLES_FILE"
+  fi
+  exit 0
 fi
 
 mkdir -p "$WORK"
@@ -100,11 +168,145 @@ json_report() {
     --wal-json "$WAL_JSON"
 }
 
+batch_first_wal_result() {
+  local wal_json="${1:?usage: batch_first_wal_result <wal_json>}"
+  python3 - "$wal_json" <<'PY'
+import json
+import sys
+
+try:
+    data = json.load(open(sys.argv[1]))
+except Exception:
+    data = []
+
+if data:
+    first = data[0]
+    print(f"{first.get('offset', '')}\t{first.get('length', '')}\t{first.get('text_b64', '')}")
+else:
+    print("\t\t")
+PY
+}
+
+batch_state_recent() {
+  local state_file="${1:?usage: batch_state_recent <state_file> <handle> <date_edited> <now>}"
+  local handle="${2:?usage: batch_state_recent <state_file> <handle> <date_edited> <now>}"
+  local date_edited="${3:?usage: batch_state_recent <state_file> <handle> <date_edited> <now>}"
+  local now="${4:?usage: batch_state_recent <state_file> <handle> <date_edited> <now>}"
+
+  [[ -f "$state_file" ]] || return 1
+  awk -F '\t' -v h="$handle" -v edited="$date_edited" -v now="$now" '
+    $1 == h && $2 == edited && now - $3 < 60 { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$state_file"
+}
+
+batch_append_record() {
+  local path="${1:?usage: batch_append_record <path> <fields...>}"
+  shift
+  local first=1
+  local field
+  for field in "$@"; do
+    if [[ "$first" == "1" ]]; then
+      first=0
+    else
+      printf '\t' >> "$path"
+    fi
+    printf '%s' "$field" >> "$path"
+  done
+  printf '\n' >> "$path"
+}
+
+run_batch_mode() {
+  local since_ns handles_path results_path state_path now
+  local handle candidate_lines latest_edited
+  local row_handle rowid guid sent_at edited_at date_edited
+  local wal_offset wal_length text_b64 wal_json_path
+
+  since_ns=$(imu_since_cutoff_ns "$SINCE") || exit 1
+  handles_path="$WORK/batch-handles.txt"
+  results_path="$WORK/batch-results.tsv"
+  state_path="$WORK/batch-state.tsv"
+  : > "$handles_path"
+  : > "$results_path"
+
+  if [[ "$ALL_HANDLES" == "1" ]]; then
+    imu_candidate_handles "$SNAP" "$since_ns" > "$handles_path"
+  else
+    awk 'NF && $1 !~ /^#/ {print $0}' "$HANDLES_FILE" > "$handles_path"
+  fi
+
+  if [[ ! -s "$handles_path" ]]; then
+    log "[batch] No handles to scan in the selected window."
+    if [[ "$JSON_MODE" == "1" ]]; then
+      printf '[]\n'
+    fi
+    return 0
+  fi
+
+  log "[batch] Scanning handles from one snapshot..."
+  now=$(date +%s)
+  while IFS= read -r handle; do
+    [[ -n "$handle" ]] || continue
+    candidate_lines=$(imu_batch_candidates_for_handle "$SNAP" "$since_ns" "$handle")
+
+    if [[ -z "$candidate_lines" ]]; then
+      log "  $handle: no retracted inbound messages in window"
+      batch_append_record "$results_path" "$handle" "" "" "" "" "" "" "" "" "0" ""
+      continue
+    fi
+
+    latest_edited=$(printf '%s\n' "$candidate_lines" | awk -F '\t' 'NR == 1 { print $6 }')
+    if batch_state_recent "$state_path" "$handle" "$latest_edited" "$now"; then
+      log "  $handle: skipped (rate-limited)"
+      batch_append_record "$results_path" "$handle" "" "" "" "" "" "" "" "" "1" "rate_limited"
+      continue
+    fi
+
+    while IFS=$'\t' read -r row_handle rowid guid sent_at edited_at date_edited; do
+      [[ -n "$rowid" ]] || continue
+      wal_offset=""
+      wal_length=""
+      text_b64=""
+      if [[ -s "$WORK/chat.db-wal" ]]; then
+        wal_json_path="$WORK/wal-$rowid.json"
+        imu_extract_from_wal_json "$WORK/chat.db-wal" "$guid" > "$wal_json_path"
+        IFS=$'\t' read -r wal_offset wal_length text_b64 <<< "$(batch_first_wal_result "$wal_json_path")"
+      fi
+      batch_append_record \
+        "$results_path" \
+        "$row_handle" "$rowid" "$guid" "$sent_at" "$edited_at" "$date_edited" \
+        "$wal_offset" "$wal_length" "$text_b64" "0" ""
+      if [[ -n "$text_b64" ]]; then
+        log "  $row_handle: ROWID $rowid recovered via WAL"
+      else
+        log "  $row_handle: ROWID $rowid no WAL text recovered"
+      fi
+    done <<< "$candidate_lines"
+
+    printf '%s\t%s\t%s\n' "$handle" "$latest_edited" "$now" >> "$state_path"
+  done < "$handles_path"
+
+  if [[ "$JSON_MODE" == "1" ]]; then
+    python3 "$LIB_DIR/batch_report.py" "$results_path"
+  else
+    log "[batch] Results written to $results_path"
+  fi
+}
+
 RAN_AT=$(imu_iso_utc)
 
 hr
 log "imessage-unsent recovery — $(date)"
-log "handle:    $HANDLE"
+if [[ "$BATCH_MODE" == "1" ]]; then
+  if [[ "$ALL_HANDLES" == "1" ]]; then
+    log "mode:      all-handles batch"
+  else
+    log "mode:      handles-file batch ($HANDLES_FILE)"
+  fi
+  log "since:     $SINCE"
+else
+  log "handle:    $HANDLE"
+fi
 log "live dir:  $LIVE"
 log "work dir:  $WORK"
 hr
@@ -133,6 +335,11 @@ if [[ ! -f "$SNAP" ]]; then
   exit 1
 fi
 hr
+
+if [[ "$BATCH_MODE" == "1" ]]; then
+  run_batch_mode
+  exit $?
+fi
 
 # ─── Step 1 ─── Locate chat by handle (NOT display_name; that's NULL for 1:1) ─
 log "[1] Resolving handle '$HANDLE' → handle.ROWID..."

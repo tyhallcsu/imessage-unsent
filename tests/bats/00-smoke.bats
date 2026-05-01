@@ -13,5 +13,5 @@ load helpers
   run "$REPO_DIR/scripts/recover.sh"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"ERROR: --handle is required"* ]]
+  [[ "$output" == *"ERROR: choose exactly one of --handle, --handles-file, or --all-handles"* ]]
 }
