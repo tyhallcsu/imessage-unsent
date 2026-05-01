@@ -10,6 +10,7 @@ rm -f "$OUT_DIR/chat.db" "$OUT_DIR/chat.db-wal" "$OUT_DIR/chat.db-shm"
 python3 - "$OUT_DIR" <<'PY'
 import os
 import plistlib
+import shutil
 import sqlite3
 import sys
 import time
@@ -64,6 +65,69 @@ def normalize_wal(wal_path):
         wal[offset + 16 : offset + 24] = struct.pack(">II", s0, s1)
 
     wal_path.write_bytes(wal)
+
+
+def build_iphone_backup_fixture(out_dir, handle, guid, fixture_text, sent_at):
+    backup_root = out_dir / "iphone-backup"
+    file_id = "3d0d7e5fb2ce288813306e4d4636395e047a3d28"
+    sms_path = backup_root / file_id[:2] / file_id
+    manifest_path = backup_root / "Manifest.db"
+
+    shutil.rmtree(backup_root, ignore_errors=True)
+    sms_path.parent.mkdir(parents=True)
+
+    manifest = sqlite3.connect(manifest_path)
+    manifest.execute(
+        """
+        CREATE TABLE Files (
+          fileID TEXT PRIMARY KEY,
+          domain TEXT NOT NULL,
+          relativePath TEXT NOT NULL
+        )
+        """
+    )
+    manifest.execute(
+        "INSERT INTO Files (fileID, domain, relativePath) VALUES (?, 'HomeDomain', 'Library/SMS/sms.db')",
+        (file_id,),
+    )
+    manifest.commit()
+    manifest.close()
+
+    sms = sqlite3.connect(sms_path)
+    sms.executescript(
+        """
+        CREATE TABLE handle (
+          ROWID INTEGER PRIMARY KEY,
+          id TEXT NOT NULL,
+          service TEXT
+        );
+        CREATE TABLE message (
+          ROWID INTEGER PRIMARY KEY,
+          guid TEXT NOT NULL,
+          text TEXT,
+          service TEXT,
+          account TEXT,
+          handle_id INTEGER,
+          date INTEGER,
+          is_from_me INTEGER
+        );
+        """
+    )
+    sms.execute("INSERT INTO handle (ROWID, id, service) VALUES (1, ?, 'iMessage')", (handle,))
+    sms.execute(
+        """
+        INSERT INTO message
+          (ROWID, guid, text, service, account, handle_id, date, is_from_me)
+        VALUES (200, ?, ?, 'iMessage', 'fixture@example.com', 1, ?, 0)
+        """,
+        (guid, fixture_text, sent_at),
+    )
+    sms.commit()
+    sms.close()
+
+    backup_unix_time = int((sent_at / 1_000_000_000) + 978_307_200 + 10)
+    for path in (backup_root, manifest_path, sms_path):
+        os.utime(path, (backup_unix_time, backup_unix_time))
 
 writer = sqlite3.connect(db_path)
 writer.execute("PRAGMA journal_mode=WAL;")
@@ -185,6 +249,7 @@ for suffix in ("-wal", "-shm"):
             break
         time.sleep(0.05)
 
+build_iphone_backup_fixture(out_dir, handle, guid, fixture_text, sent_at)
 normalize_wal(Path(f"{db_path}-wal"))
 print(f"fixture_text={fixture_text}", flush=True)
 os._exit(0)

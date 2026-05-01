@@ -21,6 +21,25 @@ copy_fixture_messages() {
   : > "$destination/chat.db-shm"
 }
 
+copy_fixture_iphone_backup() {
+  local destination="${1:?usage: copy_fixture_iphone_backup <destination>}"
+  python3 - "$FIXTURE_DIR/iphone-backup" "$destination" <<'PY'
+import os
+import shutil
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1])
+destination = Path(sys.argv[2])
+shutil.rmtree(destination, ignore_errors=True)
+shutil.copytree(source, destination, copy_function=shutil.copy2)
+
+backup_unix_time = int((797000000000000010 / 1_000_000_000) + 978_307_200 + 10)
+for path in [destination, *destination.rglob("*")]:
+    os.utime(path, (backup_unix_time, backup_unix_time))
+PY
+}
+
 install_fake_osascript() {
   local bin_dir="${1:?usage: install_fake_osascript <bin_dir>}"
   mkdir -p "$bin_dir"
