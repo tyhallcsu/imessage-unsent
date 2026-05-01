@@ -32,3 +32,5 @@ The repository's `.gitignore` excludes:
 - `imessage-recovery/` — the conventional working directory used by the script.
 
 If you fork this repo and run the script, **never push the `imessage-recovery/` working tree**. Verify with `git status` before committing.
+
+The Swift daemon and menu bar app keep the same boundary. The daemon owns all reads of the Messages database family and writes only to per-event archives under `~/Library/Application Support/imessage-unsent/archives/`. The GUI talks to the daemon socket and does not read `chat.db` directly. Restore/write-back behavior remains out of scope for the shipped default mode.

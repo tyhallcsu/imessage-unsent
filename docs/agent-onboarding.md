@@ -36,6 +36,13 @@ Extended guide for an AI agent that's never seen this repo before. Pairs with [A
 CLI (Phase 1): the recovery primitive everything else shells out to.
 ```
 
+Implementation has started for this shape:
+
+- `scripts/recover.sh --json` is the machine-readable recovery contract.
+- `daemon/` is a SwiftPM LaunchAgent package with FSEvents, detector, archive, notification, and Unix-socket API components.
+- `gui/` is a SwiftPM SwiftUI menu bar package that talks to the daemon socket and leaves Messages data access to the daemon.
+- `script/build_and_run.sh` builds both Swift packages and launches the GUI as a local `.app` bundle.
+
 The CLI (Phase 1) is the recovery primitive. The daemon (Phase 2) automates *when* it runs. The GUI (Phase 3) is how the user interacts with archives.
 
 ## Why each phase exists

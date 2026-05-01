@@ -256,6 +256,23 @@ grep -RIn "$GUID" export/
 
 This diagram mirrors `scripts/recover.sh`: snapshot the live Messages database family, resolve the target handle and candidate row, dump the retraction metadata, scan `chat.db-wal` for GUID-adjacent pre-retract text, then cross-check length and exporter output when available.
 
+## macOS app architecture (in progress)
+
+The repo now has the first Swift implementation of the planned native app:
+
+- `daemon/` builds `imu-watcher`, a user LaunchAgent process that watches `chat.db-wal`, detects inbound retractions, snapshots the DB family to `~/Library/Application Support/imessage-unsent/archives/`, runs `recover.sh --json`, and exposes archive history over `daemon.sock`.
+- `gui/` builds `IMUMenuBar`, an LSUIElement SwiftUI menu bar app. It reads only from the daemon socket, shows daemon health and recent recoveries, opens a dedicated History window, and writes settings to `~/.config/imessage-unsent/config.toml`.
+- The default mode is **Notify-only**. The daemon snapshots and reports; it does not write to live `chat.db`.
+
+Local build/test entry points:
+
+```bash
+make test
+swift test --package-path daemon
+swift test --package-path gui
+./script/build_and_run.sh
+```
+
 ## Why the WAL vector works (byte-level)
 
 SQLite in **WAL journaling mode** (the default for `chat.db`) writes new transactions to `chat.db-wal` instead of mutating the main file in place. The WAL has this structure:

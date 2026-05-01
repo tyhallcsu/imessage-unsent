@@ -11,17 +11,23 @@ permissions:
 
 jobs:
   shellcheck:
-    name: Shellcheck (recover.sh)
+    name: Shellcheck (scripts)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Run shellcheck
         run: |
           sudo apt-get update -y && sudo apt-get install -y shellcheck
-          shellcheck --severity=warning scripts/recover.sh
+          shellcheck --severity=warning \
+            scripts/recover.sh \
+            scripts/lib/*.sh \
+            scripts/install-daemon.sh \
+            scripts/uninstall-daemon.sh \
+            tests/fixtures/build-fixture.sh \
+            script/build_and_run.sh
 
   python-lint:
-    name: Python lint (decode.py)
+    name: Python lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,30 +37,42 @@ jobs:
       - name: Install linters
         run: pip install --quiet ruff
       - name: Ruff check
-        run: ruff check scripts/decode.py
+        run: ruff check scripts/decode.py scripts/lib/wal_extract.py scripts/lib/json_report.py tests/python/test_decode.py
       - name: Compile-check
-        run: python -m py_compile scripts/decode.py
+        run: python -m py_compile scripts/decode.py scripts/lib/wal_extract.py scripts/lib/json_report.py
 
   bats-tests:
-    name: bats tests (if present)
+    name: bats tests
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Detect bats tests
-        id: detect
-        run: |
-          if [ -d tests/bats ]; then
-            echo "has_tests=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_tests=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No tests/bats directory yet — skipping. Tracked in Phase 1 (issue #3)."
-          fi
       - name: Install bats
-        if: steps.detect.outputs.has_tests == 'true'
         run: brew install bats-core
       - name: Run bats
-        if: steps.detect.outputs.has_tests == 'true'
         run: bats tests/bats
+
+  pytest:
+    name: pytest
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pytest
+        run: pip install --quiet pytest
+      - name: Run pytest
+        run: pytest tests/python
+
+  swift:
+    name: Swift build and test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Daemon tests
+        run: swift test --package-path daemon
+      - name: GUI tests
+        run: swift test --package-path gui
 
   readme-link-check:
     name: README link check
