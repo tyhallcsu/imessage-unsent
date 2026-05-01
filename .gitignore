@@ -18,10 +18,13 @@ chat.db
 chat.db-wal
 chat.db-shm
 chat.db-*
+!tests/fixtures/chat.db
+!tests/fixtures/chat.db-wal
 *.sms.db
 iphone-sms.db
 wal-strings-*.txt
 wal-near-guid.txt
+wal-candidates.json
 exporter-hits.txt
 chat-search.tsv
 candidates.tsv
@@ -39,6 +42,13 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+
+# Swift / local app bundles
+.build/
+daemon/.build/
+gui/.build/
+dist/
+.swiftpm/
 
 # Auto-generated session/plan files (Claude Code working artifacts) — never commit
 CHAT.md
