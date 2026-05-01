@@ -10,7 +10,10 @@ let package = Package(
     .executable(name: "imu-watcher", targets: ["imu-watcher"])
   ],
   targets: [
-    .target(name: "IMUCore"),
+    .target(
+      name: "IMUCore",
+      linkerSettings: [.linkedLibrary("sqlite3")]
+    ),
     .executableTarget(name: "imu-watcher", dependencies: ["IMUCore"]),
     .testTarget(name: "IMUCoreTests", dependencies: ["IMUCore"])
   ]
