@@ -334,23 +334,34 @@ log "work dir:  $WORK"
 hr
 
 # ─── Step 0 ─── Freeze state ───────────────────────────────────────────────
-log "[0] Quitting Messages.app and snapshotting chat.db family..."
-if imu_snapshot "$WORK" "$LIVE" >/dev/null; then
+if [[ -f "$SNAP" ]]; then
+  log "[0] Using existing chat.db snapshot in work dir..."
   for f in chat.db chat.db-wal chat.db-shm; do
     if [[ -f "$WORK/$f" ]]; then
-      log "  copied $f  ($(imu_stat_size "$WORK/$f") bytes, mtime $(imu_stat_mtime "$WORK/$f"))"
+      log "  found $f  ($(imu_stat_size "$WORK/$f") bytes, mtime $(imu_stat_mtime "$WORK/$f"))"
     else
-      log "  WARN: $LIVE/$f not present"
+      log "  WARN: $WORK/$f not present"
     fi
   done
 else
-  for f in chat.db chat.db-wal chat.db-shm; do
-    if [[ -f "$WORK/$f" ]]; then
-      log "  copied $f  ($(imu_stat_size "$WORK/$f") bytes, mtime $(imu_stat_mtime "$WORK/$f"))"
-    else
-      log "  WARN: $LIVE/$f not present"
-    fi
-  done
+  log "[0] Quitting Messages.app and snapshotting chat.db family..."
+  if imu_snapshot "$WORK" "$LIVE" >/dev/null; then
+    for f in chat.db chat.db-wal chat.db-shm; do
+      if [[ -f "$WORK/$f" ]]; then
+        log "  copied $f  ($(imu_stat_size "$WORK/$f") bytes, mtime $(imu_stat_mtime "$WORK/$f"))"
+      else
+        log "  WARN: $LIVE/$f not present"
+      fi
+    done
+  else
+    for f in chat.db chat.db-wal chat.db-shm; do
+      if [[ -f "$WORK/$f" ]]; then
+        log "  copied $f  ($(imu_stat_size "$WORK/$f") bytes, mtime $(imu_stat_mtime "$WORK/$f"))"
+      else
+        log "  WARN: $LIVE/$f not present"
+      fi
+    done
+  fi
 fi
 if [[ ! -f "$SNAP" ]]; then
   log "  ABORT: $SNAP missing — does the terminal have Full Disk Access?"
