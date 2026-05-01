@@ -8,6 +8,7 @@ The fixture is safe to commit because it is generated from scratch by `build-fix
 - account `fixture@example.com`
 - three normal synthetic inbound messages
 - one synthetic inbound retraction with recoverable WAL text: `Recovered fixture message: hello WAL data!`
+- one synthetic unencrypted iPhone backup at `iphone-backup/` whose `Manifest.db` maps `Library/SMS/sms.db` to the standard backup file ID
 
 It does not come from `~/Library/Messages`, does not include real GUIDs, and does not contain real message content.
 

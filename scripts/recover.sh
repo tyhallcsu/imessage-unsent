@@ -11,6 +11,8 @@
 #   ./recover.sh --handle '+1...' --rowid 123   # skip auto-detect; force ROWID
 #   ./recover.sh --handle '+1...' --work /custom/dir
 #   ./recover.sh --handle '+1...' --json       # emit machine-readable JSON on stdout
+#   ./recover.sh --handle '+1...' --include-iphone-backup --json
+#   ./recover.sh --handle '+1...' --include-iphone-backup /path/to/backup --json
 #   ./recover.sh --all-handles --since 24h --json
 #   ./recover.sh --handles-file handles.txt --since 7d --json
 #   ./recover.sh --handles-file handles.txt --dry-run
@@ -54,6 +56,9 @@ LIVE="$HOME/Library/Messages"
 JSON_MODE=0
 SINCE="24h"
 DRY_RUN=0
+INCLUDE_IPHONE_BACKUP=0
+IPHONE_BACKUP_PATH=""
+IPHONE_BACKUP_CONFIG="$HOME/.config/imessage-unsent/iphone-backup-paths.txt"
 
 usage() {
   sed -n '2,30p' "$0"
@@ -70,6 +75,15 @@ while [[ $# -gt 0 ]]; do
     --json)   JSON_MODE=1; shift ;;
     --since)  SINCE="$2";  shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --include-iphone-backup)
+      INCLUDE_IPHONE_BACKUP=1
+      if [[ $# -gt 1 && "${2:-}" != --* ]]; then
+        IPHONE_BACKUP_PATH="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
     -h|--help) usage 0 ;;
     *) echo "unknown arg: $1" >&2; usage 1 ;;
   esac
@@ -101,6 +115,11 @@ fi
 
 if [[ "$BATCH_MODE" == "1" && -n "$ROWID" ]]; then
   echo "ERROR: --rowid is only supported with --handle" >&2
+  exit 1
+fi
+
+if [[ "$BATCH_MODE" == "1" && "$INCLUDE_IPHONE_BACKUP" == "1" ]]; then
+  echo "ERROR: --include-iphone-backup is only supported with --handle" >&2
   exit 1
 fi
 
@@ -149,7 +168,9 @@ MSI="$WORK/msi.bin"
 AB="$WORK/ab.bin"
 MSI_XML="$WORK/msi.xml"
 WAL_JSON="$WORK/wal-candidates.json"
+IPHONE_BACKUP_JSON="$WORK/iphone-backup.json"
 : > "$LOG"
+printf '{"enabled":false,"hit":false,"reason":"not requested"}\n' > "$IPHONE_BACKUP_JSON"
 
 log() { printf '%s\n' "$*" | tee -a "$LOG" >&2; }
 hr()  { log "================================================================"; }
@@ -165,7 +186,8 @@ json_report() {
     --edited-at "${EDITED_AT:-}" \
     --msi "$MSI" \
     --ab "$AB" \
-    --wal-json "$WAL_JSON"
+    --wal-json "$WAL_JSON" \
+    --iphone-json "$IPHONE_BACKUP_JSON"
 }
 
 batch_first_wal_result() {
@@ -404,9 +426,11 @@ if [[ -z "${GUID:-}" ]]; then
   GUID=$(sqlite3 -readonly "$SNAP" "SELECT guid FROM message WHERE ROWID=$ROWID;")
 fi
 log "  -> candidate GUID: $GUID"
-IFS='|' read -r SENT_AT EDITED_AT <<<"$(sqlite3 -readonly -separator '|' "$SNAP" "
+IFS='|' read -r SENT_AT EDITED_AT SENT_NS EDITED_NS <<<"$(sqlite3 -readonly -separator '|' "$SNAP" "
   SELECT datetime(date/1000000000 + 978307200, 'unixepoch', 'localtime'),
-         datetime(date_edited/1000000000 + 978307200, 'unixepoch', 'localtime')
+         datetime(date_edited/1000000000 + 978307200, 'unixepoch', 'localtime'),
+         date,
+         date_edited
   FROM message WHERE ROWID=$ROWID;
 ")"
 hr
@@ -502,11 +526,46 @@ else
 fi
 hr
 
-# ─── Step 6 ─── Other vectors (informational) ─────────────────────────────
-log "[6] Other recovery vectors to consider manually:"
+# ─── Step 6 ─── iPhone backup vector ──────────────────────────────────────
+log "[6] iPhone backup vector..."
+if [[ "$INCLUDE_IPHONE_BACKUP" == "1" ]]; then
+  IPHONE_ARGS=(
+    --handle "$HANDLE"
+    --guid "$GUID"
+    --sent-ns "$SENT_NS"
+    --edited-ns "$EDITED_NS"
+    --home "$HOME"
+    --config "$IPHONE_BACKUP_CONFIG"
+  )
+  if [[ -n "$IPHONE_BACKUP_PATH" ]]; then
+    IPHONE_ARGS+=(--path "$IPHONE_BACKUP_PATH")
+  fi
+
+  if python3 "$LIB_DIR/iphone_backup.py" "${IPHONE_ARGS[@]}" > "$IPHONE_BACKUP_JSON" 2>>"$LOG"; then
+    python3 - "$IPHONE_BACKUP_JSON" <<'PY' | sed 's/^/  /' | tee -a "$LOG" >&2
+import json
+import sys
+
+payload = json.load(open(sys.argv[1]))
+if payload.get("hit"):
+    backup = payload.get("backup") or {}
+    print(f"iPhone backup hit: {payload.get('length')} bytes from {backup.get('root')}")
+else:
+    print(f"iPhone backup miss: {payload.get('reason')}")
+PY
+  else
+    log "  iPhone backup vector failed; see report.txt for details."
+    printf '{"enabled":true,"hit":false,"reason":"iphone backup helper failed"}\n' > "$IPHONE_BACKUP_JSON"
+  fi
+else
+  log "  not requested; pass --include-iphone-backup [path] to enable."
+fi
+hr
+
+# ─── Step 7 ─── Other vectors (informational) ─────────────────────────────
+log "[7] Other recovery vectors to consider manually:"
 log "  - Time Machine snapshots of chat.db (tmutil listbackups, then mount)"
 log "  - APFS local snapshots (tmutil listlocalsnapshots /)"
-log "  - iPhone backups in ~/Library/Application Support/MobileSync/Backup/"
 log "  - iMazing / iExplorer / 3uTools backups (paths vary)"
 hr
 

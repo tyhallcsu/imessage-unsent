@@ -244,7 +244,7 @@ grep -RIn "$GUID" export/
 
 - **Time Machine** — `tmutil listbackups`. Mount an older backup and pull a `chat.db` from before the unsend. Most reliable when configured.
 - **APFS local snapshots** — `tmutil listlocalsnapshots /`. Mount and copy.
-- **iPhone backup (encrypted Manifest.db)** — `~/Library/Application Support/MobileSync/Backup/<UUID>/3d/3d0d7e5fb2ce288813306e4d4636395e047a3d28` is the iPhone's `sms.db`. If the phone synced after the message arrived but before the unsend propagated, it's intact there.
+- **iPhone backup** — `~/Library/Application Support/MobileSync/Backup/<UUID>/3d/3d0d7e5fb2ce288813306e4d4636395e047a3d28` is the iPhone's `sms.db`. If the phone synced after the message arrived but before the unsend propagated, it's intact there. Encrypted backups must be decrypted outside this tool first.
 - **iMazing / iExplorer / 3uTools** — third-party iPhone backup managers store at their own paths.
 - **iCloud Backup** — recoverable only via full restore, generally not worth it for one message.
 
@@ -336,6 +336,10 @@ cd imessage-unsent
 # Machine-readable output for automation
 ./scripts/recover.sh --handle '+15551234567' --json
 
+# Also check an iPhone backup if WAL recovery misses
+./scripts/recover.sh --handle '+15551234567' --include-iphone-backup --json
+./scripts/recover.sh --handle '+15551234567' --include-iphone-backup /path/to/backup --json
+
 # Batch scan all handles with recent inbound retractions
 ./scripts/recover.sh --all-handles --since 24h --json
 
@@ -367,7 +371,10 @@ The script writes everything under `/tmp/imessage-recovery/` (override with `--w
 | `ab.bin`                   | The (usually empty) attributedBody BLOB                |
 | `wal-hits.txt`             | **Recovered text candidates from the WAL**             |
 | `wal-candidates.json`      | WAL candidates used to build `--json` output           |
+| `iphone-backup.json`       | Optional iPhone backup vector result                   |
 | `export/` (if installed)   | imessage-exporter output                               |
+
+For third-party iPhone backup locations, create `~/.config/imessage-unsent/iphone-backup-paths.txt` with one backup directory or direct `sms.db` path per line. `--include-iphone-backup` auto-discovery scans both MobileSync backups and those configured paths.
 
 ## Sanitized case study
 

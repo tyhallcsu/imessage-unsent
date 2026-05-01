@@ -33,6 +33,16 @@
     "exporter": {
       "hit": false,
       "reason": "not run or no recoverable text"
+    },
+    "iphone_backup": {
+      "enabled": false,
+      "hit": false,
+      "reason": "not requested",
+      "backup": null,
+      "candidate": null,
+      "text_b64": null,
+      "length": null,
+      "checked": []
     }
   },
   "recovered": {
