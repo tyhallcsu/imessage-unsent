@@ -5,17 +5,20 @@ public struct DaemonConfig: Equatable {
   public var dataDir: String
   public var archiveRetention: Int
   public var notifications: NotificationConfig
+  public var experimental: ExperimentalConfig
 
   public init(
     logLevel: String = "info",
     dataDir: String = "~/Library/Application Support/imessage-unsent",
     archiveRetention: Int = 100,
-    notifications: NotificationConfig = NotificationConfig()
+    notifications: NotificationConfig = NotificationConfig(),
+    experimental: ExperimentalConfig = ExperimentalConfig()
   ) {
     self.logLevel = logLevel
     self.dataDir = dataDir
     self.archiveRetention = archiveRetention
     self.notifications = notifications
+    self.experimental = experimental
   }
 }
 
@@ -35,6 +38,29 @@ public struct NotificationConfig: Equatable {
     self.previewChars = previewChars
     self.webhook = webhook
     self.webhookSigningSecret = webhookSigningSecret
+  }
+}
+
+/// Toggles for capabilities that are off-by-default and require explicit user
+/// consent before any code path that depends on them is allowed to run.
+///
+/// Today the only flag is ``restoreMode`` — a guard for future write-back
+/// behavior tracked in issue #16 (experimental "Restore" mode). The daemon
+/// shipped in v0.2 is **Notify-only**: it observes retractions and recovers
+/// the original text into the archive, but never modifies live `chat.db`.
+/// Codified by issue #17.
+public struct ExperimentalConfig: Equatable {
+  /// When `true`, future code paths are permitted to write to live `chat.db`.
+  /// Must be paired with an explicit user-consent flow (issue #16) before any
+  /// such code path is wired up. Default: `false`.
+  ///
+  /// Today no daemon code writes to `chat.db`; this flag exists to make the
+  /// invariant testable (see ``RestoreModeGuard``) and to fail-closed if any
+  /// future PR adds a write path without the consent flow in place.
+  public var restoreMode: Bool
+
+  public init(restoreMode: Bool = false) {
+    self.restoreMode = restoreMode
   }
 }
 
@@ -82,6 +108,11 @@ public struct ConfigStore {
         continue
       }
 
+      if section == "experimental" {
+        applyExperimentalValue(key: parts[0], value: parts[1], config: &config)
+        continue
+      }
+
       switch parts[0] {
       case "log_level":
         config.logLevel = parseString(parts[1])
@@ -97,6 +128,17 @@ public struct ConfigStore {
     }
 
     return config
+  }
+
+  private static func applyExperimentalValue(key: String, value: String, config: inout DaemonConfig) {
+    switch key {
+    case "restore_mode":
+      if let restoreMode = parseBool(value) {
+        config.experimental.restoreMode = restoreMode
+      }
+    default:
+      return
+    }
   }
 
   private static func applyNotificationValue(key: String, value: String, config: inout DaemonConfig) {
