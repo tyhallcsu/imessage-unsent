@@ -11,17 +11,19 @@ permissions:
 
 jobs:
   shellcheck:
-    name: Shellcheck (recover.sh)
+    name: Shellcheck (all shell sources)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run shellcheck
+      - name: Install shellcheck
         run: |
-          sudo apt-get update -y && sudo apt-get install -y shellcheck
-          shellcheck --severity=warning scripts/recover.sh
+          sudo apt-get update -y
+          sudo apt-get install -y shellcheck
+      - name: Run shellcheck via Make
+        run: make shellcheck
 
   python-lint:
-    name: Python lint (decode.py)
+    name: Python lint (ruff + py_compile)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,31 +32,77 @@ jobs:
           python-version: "3.12"
       - name: Install linters
         run: pip install --quiet ruff
-      - name: Ruff check
-        run: ruff check scripts/decode.py
-      - name: Compile-check
-        run: python -m py_compile scripts/decode.py
+      - name: Run python-check via Make
+        run: make python-check
+
+  pytest:
+    name: pytest (tests/python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pytest
+        run: pip install --quiet pytest
+      - name: Build deterministic fixture
+        run: make fixture
+      - name: Run pytest via Make
+        run: make python-test
 
   bats-tests:
-    name: bats tests (if present)
+    name: bats tests (tests/bats)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Detect bats tests
-        id: detect
-        run: |
-          if [ -d tests/bats ]; then
-            echo "has_tests=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_tests=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No tests/bats directory yet — skipping. Tracked in Phase 1 (issue #3)."
-          fi
-      - name: Install bats
-        if: steps.detect.outputs.has_tests == 'true'
+      - name: Cache Homebrew bottles
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/Homebrew/downloads
+          key: brew-bats-core-${{ runner.os }}-v1
+          restore-keys: |
+            brew-bats-core-${{ runner.os }}-
+      - name: Install bats-core
         run: brew install bats-core
+      - name: Build deterministic fixture
+        run: make fixture
       - name: Run bats
-        if: steps.detect.outputs.has_tests == 'true'
         run: bats tests/bats
+
+  swift-build-daemon:
+    name: Swift build + test (daemon)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache daemon .build
+        uses: actions/cache@v4
+        with:
+          path: daemon/.build
+          key: swift-daemon-${{ runner.os }}-${{ hashFiles('daemon/Package.swift', 'daemon/Sources/**/*.swift', 'daemon/Tests/**/*.swift') }}
+          restore-keys: |
+            swift-daemon-${{ runner.os }}-
+      - name: swift build
+        run: swift build --package-path daemon
+      - name: swift test
+        run: swift test --package-path daemon
+
+  swift-build-gui:
+    name: Swift build + test (gui)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache gui .build
+        uses: actions/cache@v4
+        with:
+          path: gui/.build
+          key: swift-gui-${{ runner.os }}-${{ hashFiles('gui/Package.swift', 'gui/Sources/**/*.swift', 'gui/Tests/**/*.swift') }}
+          restore-keys: |
+            swift-gui-${{ runner.os }}-
+      - name: swift build
+        run: swift build --package-path gui
+      - name: swift test
+        run: swift test --package-path gui
 
   readme-link-check:
     name: README link check
