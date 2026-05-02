@@ -8,6 +8,17 @@ This repository documents and implements a **defensive / personal forensics** te
 - Forensic understanding of how Apple implements message retraction.
 - Personal data archaeology against your own iCloud-synced devices.
 
+## Operating mode — Notify-only
+
+The shipped tooling (CLI + daemon) operates in **Notify-only / Recover** mode and **never modifies the live `chat.db`**. Retractions are observed read-only, the recovered text is archived under your data directory, and macOS notifications / webhooks surface the result. Apple's Messages UI continues to truthfully say "X unsent a message."
+
+A future experimental "Restore" mode that *would* write the recovered text back into `chat.db` is tracked by [issue #16](https://github.com/tyhallcsu/imessage-unsent/issues/16) and gated behind both `experimental.restore_mode = true` and a per-invocation consent flow. Until #16 ships and is reviewed, no code path writes to live `chat.db`. The invariant is enforced by:
+
+- bats test [`60-guardrail-no-chatdb-writes.bats`](tests/bats/60-guardrail-no-chatdb-writes.bats) — sha256 the live fixture before and after a full recovery run, assert equality.
+- Swift test `RestoreModeGuardTests` — assert the daemon's `RestoreModeGuard.requireRestoreMode` throws under default config.
+
+See the [Modes section in the README](README.md#modes--recover-vs-restore) for the full Recover-vs-Restore comparison.
+
 ## Out-of-scope / not-supported uses
 
 Do **not** use this tooling to:

@@ -40,6 +40,7 @@ But SQLite doesn't overwrite pages in place — it writes new page images to a *
 - [Why the WAL vector works (byte-level)](#why-the-wal-vector-works-byte-level)
 - [Usage](#usage)
 - [Sanitized case study](#sanitized-case-study)
+- [Modes — Recover vs Restore](#modes--recover-vs-restore)
 - [Limitations](#limitations)
 - [Prerequisites](#prerequisites)
 - [Privacy and legal](#privacy-and-legal)
@@ -389,6 +390,40 @@ A live recovery on macOS 24.6 (April 2026):
 7. **Vector 6 (backups).** Not needed.
 
 Total time from realizing the message was unsent → recovered text: ~25 minutes (most of which was investigating before the script was written).
+
+## Modes — Recover vs Restore
+
+> [!IMPORTANT]
+> v0.2 ships **Recover (Notify-only)** and only Recover. Restore mode is a research track that requires explicit opt-in and a per-invocation consent flow. The CLI and daemon **never** modify live `chat.db` in any released code path.
+
+|                              | **Recover** (Notify-only)                                | **Restore** (experimental, *not yet shipped*)              |
+| ---------------------------- | -------------------------------------------------------- | ---------------------------------------------------------- |
+| **Status**                   | ✅ Ships in v0.2                                          | 🚧 Tracked by [#16](https://github.com/tyhallcsu/imessage-unsent/issues/16); not implemented yet |
+| **Live `chat.db` writes**    | **Never**. Read-only via `sqlite3 -readonly` and `SQLITE_OPEN_READONLY`. | Permitted only after consent flow + explicit opt-in.       |
+| **Apple Messages UI**        | Still shows "X unsent a message"                         | Would patch the row so the original text reappears         |
+| **iCloud sync risk**         | None (no writes)                                         | High — write may resync to other devices and overwrite     |
+| **User opt-in**              | Default                                                  | `experimental.restore_mode = true` **and** consent dialog  |
+| **Output**                   | macOS notification + signed webhook + recovery archive   | Same, plus modified `chat.db`                              |
+| **Tests guarding it**        | `tests/bats/60-guardrail-no-chatdb-writes.bats` (sha256 before/after); `RestoreModeGuardTests` (Swift) | TBD with #16                                               |
+
+### Why Notify-only is the default
+
+Restoring text into `chat.db` is interesting in theory and dangerous in practice:
+
+- **iCloud Messages** can sync the modified row back to other devices, including the sender's. That changes someone else's local data without their consent.
+- **Messages.app** can crash or corrupt its index if rows mutate while the app is running. The recovery happens precisely when retractions arrive — i.e., when Messages is most likely to be running.
+- **Forensic value erodes** the moment we mutate. A row whose `text` was nulled by Apple, then re-populated by us, is no longer evidence of either Apple's retraction or the original message — it's a hybrid that no court-admissible report can rely on.
+
+For the v0.2 ship, these costs outweigh the convenience benefit. The detector observes, the archiver preserves, and the menu bar app surfaces. The user reads what was unsent. Apple's UI continues to truthfully say "X unsent a message." Nothing changes on the sender's device.
+
+### How the guardrail is enforced
+
+Two layers, both checked in CI:
+
+1. **CLI / `recover.sh`** — every SQLite call uses `-readonly`; the snapshot step copies into a separate `--work` directory and never writes back. Bats test [`60-guardrail-no-chatdb-writes.bats`](tests/bats/60-guardrail-no-chatdb-writes.bats) sha256s the live fixture before and after a full recovery run and asserts equality.
+2. **Daemon / `IMUCore`** — `RetractionDetector` opens `chat.db` with `SQLITE_OPEN_READONLY | SQLITE_OPEN_URI` and `mode=ro` (see [`RetractionDetector.swift:93`](daemon/Sources/IMUCore/RetractionDetector.swift)); `ArchivePipeline` only `copyItem(at: source, to: destination)` (see [`ArchivePipeline.swift`](daemon/Sources/IMUCore/ArchivePipeline.swift)). Any future write path must call [`RestoreModeGuard.requireRestoreMode`](daemon/Sources/IMUCore/RestoreModeGuard.swift), which throws unless `experimental.restore_mode = true`.
+
+If you find a code path that bypasses either layer, that's a bug — please file an issue.
 
 ## Limitations
 

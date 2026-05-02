@@ -12,6 +12,7 @@ final class ConfigStoreTests: XCTestCase {
 
     XCTAssertEqual(config.logLevel, "info")
     XCTAssertEqual(config.dataDir, "~/Library/Application Support/imessage-unsent")
+    XCTAssertEqual(config.experimental.restoreMode, false, "restore_mode must default to false (Notify-only)")
   }
 
   func testParsesLogLevelAndDataDir() {
@@ -38,6 +39,7 @@ final class ConfigStoreTests: XCTestCase {
     XCTAssertEqual(config.notifications.previewChars, 20)
     XCTAssertEqual(config.notifications.webhook, "https://example.test/hook")
     XCTAssertEqual(config.notifications.webhookSigningSecret, "secret")
+    XCTAssertEqual(config.experimental.restoreMode, false, "absent [experimental] section must keep the safe default")
   }
 
   func testExpandsTildeRelativeToHome() {
@@ -46,6 +48,49 @@ final class ConfigStoreTests: XCTestCase {
     XCTAssertEqual(
       expandTilde("~/Library/Application Support/imessage-unsent", home: home).path,
       "/Users/example/Library/Application Support/imessage-unsent"
+    )
+  }
+
+  func testExperimentalSectionIsParsedAndDefaultsRetainedWhenAbsent() {
+    let configOptIn = ConfigStore.parse(
+      """
+      log_level = "info"
+
+      [experimental]
+      restore_mode = true
+      """
+    )
+    XCTAssertTrue(configOptIn.experimental.restoreMode)
+
+    let configExplicitOff = ConfigStore.parse(
+      """
+      [experimental]
+      restore_mode = false
+      """
+    )
+    XCTAssertFalse(configExplicitOff.experimental.restoreMode)
+
+    let configNoSection = ConfigStore.parse(
+      """
+      log_level = "warn"
+      """
+    )
+    XCTAssertFalse(
+      configNoSection.experimental.restoreMode,
+      "missing [experimental] section must NOT silently enable Restore mode"
+    )
+  }
+
+  func testExperimentalSectionRejectsNonBoolValues() {
+    let config = ConfigStore.parse(
+      """
+      [experimental]
+      restore_mode = "definitely yes"
+      """
+    )
+    XCTAssertFalse(
+      config.experimental.restoreMode,
+      "non-boolean restore_mode values must fall back to the safe default"
     )
   }
 }
