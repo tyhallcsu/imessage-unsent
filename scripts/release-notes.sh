@@ -39,22 +39,27 @@ else
   range_label="All commits (first release)"
 fi
 
-# Pull commits in the range, dropping noise.
-mapfile -t commits < <(
-  git log --no-merges --pretty='%s|%h' "$range" \
-    | grep -Ev '^(chore|merge|Merge pull request)' || true
-)
+# Pull commits in the range, dropping noise. Stash to a temp file so we can
+# iterate the same list multiple times without re-running git log, AND so the
+# script stays portable to bash 3.2 (no `mapfile`, which is bash 4+ — macOS
+# ships /bin/bash 3.2 and CI's macos-latest can hit it via `env bash`).
+COMMITS_FILE="$(mktemp -t imu-release-notes-commits.XXXXXX)"
+trap 'rm -f "$COMMITS_FILE"' EXIT
+
+git log --no-merges --pretty='%s|%h' "$range" 2>/dev/null \
+  | grep -Ev '^(chore|merge|Merge pull request)' \
+  > "$COMMITS_FILE" || true
 
 filter_section() {
   local prefix="$1"
-  local commit
-  for commit in "${commits[@]}"; do
+  local commit subject sha display
+  while IFS= read -r commit; do
     case "$commit" in
       "${prefix}:"*|"${prefix}("*)
-        local subject="${commit%|*}"
-        local sha="${commit##*|}"
+        subject="${commit%|*}"
+        sha="${commit##*|}"
         # Strip the leading `<prefix>: ` (or `<prefix>(<scope>): `) from display
-        local display="${subject#"${prefix}"}"
+        display="${subject#"${prefix}"}"
         display="${display#:}"
         display="${display#(*)}"
         display="${display#:}"
@@ -62,21 +67,21 @@ filter_section() {
         printf -- '- %s (%s)\n' "$display" "$sha"
         ;;
     esac
-  done
+  done < "$COMMITS_FILE"
 }
 
 filter_other() {
-  local commit
-  for commit in "${commits[@]}"; do
+  local commit subject sha
+  while IFS= read -r commit; do
     case "$commit" in
       feat:*|feat\(*|fix:*|fix\(*|docs:*|docs\(*) ;;
       *)
-        local subject="${commit%|*}"
-        local sha="${commit##*|}"
+        subject="${commit%|*}"
+        sha="${commit##*|}"
         printf -- '- %s (%s)\n' "$subject" "$sha"
         ;;
     esac
-  done
+  done < "$COMMITS_FILE"
 }
 
 print_section() {
