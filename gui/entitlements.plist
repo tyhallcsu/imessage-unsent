@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  IMUMenuBar entitlements.
+
+  This file is intentionally minimal.
+
+  Notarization (issue #20) requires the binary to be signed with the Hardened
+  Runtime enabled. That's a codesign flag (`--options=runtime`), not an
+  entitlements key — so this file can be empty as far as Hardened Runtime is
+  concerned and signing still works end-to-end.
+
+  We deliberately do NOT enable App Sandbox (`com.apple.security.app-sandbox`)
+  here. Three reasons:
+
+  1. The GUI reads recovery archives from arbitrary paths under
+     `~/Library/Application Support/imessage-unsent/archives/<id>/`
+     (see RecoveryDetailLoader from #49). Sandboxing would block that read
+     unless we either move archives inside the GUI's container (different
+     permission model than the daemon writes today) or pair every read with
+     a security-scoped bookmark dance. Out of scope for this PR.
+
+  2. The Contacts integration (CNContactStore in #49) currently relies on
+     the unsandboxed flow (NSContactsUsageDescription + runtime
+     authorization). Sandboxing it would also need
+     `com.apple.security.personal-information.addressbook` AND a re-test of
+     the permission prompt UX. Out of scope for this PR.
+
+  3. The webhook posting from the daemon side already lives in a separate
+     LaunchAgent process — sandboxing the GUI does not constrain the daemon.
+
+  Sandboxing remains a desirable end state and should land as its own PR
+  once #49's archive-read and Contacts-access patterns have been adapted to
+  the sandbox file-access rules.
+-->
+<plist version="1.0">
+<dict>
+</dict>
+</plist>
