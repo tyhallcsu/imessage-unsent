@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsWindow: View {
   @ObservedObject var model: MenuBarModel
   @ObservedObject var settingsModel: SettingsModel
+  @ObservedObject var restartModel: DaemonRestartModel
 
   var body: some View {
     Form {
@@ -45,6 +46,49 @@ struct SettingsWindow: View {
       infoRow(label: "Last WAL change", value: model.statusInfo?.lastWalChangeAt ?? "never")
       if let lastError = model.statusInfo?.lastError, !lastError.isEmpty {
         infoRow(label: "Last error", value: lastError)
+      }
+      restartRow
+    }
+  }
+
+  @ViewBuilder
+  private var restartRow: some View {
+    HStack {
+      Button {
+        Task {
+          await restartModel.restart()
+          model.refresh()
+        }
+      } label: {
+        if restartModel.isRestarting {
+          HStack(spacing: 6) {
+            ProgressView().controlSize(.small)
+            Text("Restarting…")
+          }
+        } else {
+          Text("Restart imu-watcher")
+        }
+      }
+      .disabled(restartModel.isRestarting)
+      .help("Sends `launchctl kickstart -k` to the watcher LaunchAgent and waits for it to come back up.")
+
+      Spacer()
+
+      switch restartModel.state {
+      case .idle:
+        EmptyView()
+      case .restarting:
+        EmptyView()
+      case let .succeeded(message):
+        Label(message, systemImage: "checkmark.circle.fill")
+          .foregroundStyle(.green)
+          .font(.callout)
+          .lineLimit(2)
+      case let .failed(reason):
+        Label(reason, systemImage: "exclamationmark.triangle.fill")
+          .foregroundStyle(.red)
+          .font(.callout)
+          .lineLimit(2)
       }
     }
   }
