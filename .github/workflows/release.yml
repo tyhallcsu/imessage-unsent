@@ -5,31 +5,98 @@ on:
     tags:
       - "v*.*.*"
       - "v*.*.*-*"
+  # Manual trigger for testing the workflow plumbing without cutting a real
+  # tag. Pass the tag name explicitly; the workflow refuses anything that
+  # is not present on `main` so a stray manual run cannot draft a release
+  # off an unreviewed branch.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re-)build (e.g. v0.1.0-rc1)"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build, test, and publish release artifacts
-    runs-on: macos-latest
+  # Cheap, portable steps run on ubuntu so macOS minutes (10x billable on
+  # private repos) are spent only on the irreducible build + sign + notarize.
+  prepare:
+    name: Prepare release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.verify.outputs.tag }}
+      prerelease: ${{ steps.verify.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # full history for release notes generation
+          fetch-depth: 0
 
-      - name: Verify tag format
+      - name: Verify tag format and ancestry
+        id: verify
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
-            echo "::error::Tag $tag is not semver (vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-prerelease)"; exit 1
-          fi
-          echo "TAG=$tag" >> "$GITHUB_ENV"
-          if [[ "$tag" == *-* ]]; then
-            echo "PRERELEASE=true" >> "$GITHUB_ENV"
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            tag="${{ inputs.tag }}"
           else
-            echo "PRERELEASE=false" >> "$GITHUB_ENV"
+            tag="${GITHUB_REF#refs/tags/}"
           fi
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::Tag $tag is not semver (vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-prerelease)"
+            exit 1
+          fi
+          # Tags must point at a commit that's already on main, since the
+          # release workflow no longer re-runs the swift test gate; CI on
+          # main is the gate.
+          if ! git merge-base --is-ancestor "$tag" origin/main; then
+            echo "::error::Tag $tag does not point at a commit on origin/main."
+            echo "::error::Merge the change to main first, then push the tag."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [[ "$tag" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate release notes
+        run: |
+          mkdir -p staging
+          bash scripts/release-notes.sh "${{ steps.verify.outputs.tag }}" \
+            | sed "s/VERSION/${{ steps.verify.outputs.tag }}/g" \
+            > staging/release-notes.md
+          echo "--- release notes preview ---"
+          cat staging/release-notes.md
+
+      - name: Build source tarball
+        run: |
+          # Tarball excludes build artifacts and other generated paths.
+          # `staging/` is excluded so the tarball does not contain itself.
+          tar --exclude='.git' --exclude='dist' --exclude='imessage-recovery' \
+              --exclude='**/.build' --exclude='staging' \
+              -czf "staging/imessage-unsent-${{ steps.verify.outputs.tag }}-source.tar.gz" .
+          ( cd staging && shasum -a 256 "imessage-unsent-${{ steps.verify.outputs.tag }}-source.tar.gz" \
+              > "imessage-unsent-${{ steps.verify.outputs.tag }}-source.tar.gz.sha256" )
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata
+          path: staging/
+          if-no-files-found: error
+          retention-days: 7
+
+  # Only step that genuinely needs macOS: Swift toolchain (AppKit/SwiftUI),
+  # codesign, and notarytool. Swift tests are intentionally NOT re-run here;
+  # CI on main has already gated them and `prepare` enforces tag-on-main.
+  build-macos:
+    name: Build macOS artifacts (sign + notarize)
+    runs-on: macos-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
 
       - name: Cache daemon .build
         uses: actions/cache@v4
@@ -47,64 +114,70 @@ jobs:
           restore-keys: |
             swift-gui-release-${{ runner.os }}-
 
-      - name: Run swift tests (gate the release)
-        run: |
-          swift test --package-path daemon
-          swift test --package-path gui
-
       - name: Build + sign + notarize release artifacts
         env:
           # Signing secrets (optional). When all four are present,
           # scripts/sign-release.sh signs both the daemon binary and the
           # GUI .app with the Developer ID Application cert and Hardened
-          # Runtime. When any are missing, signing is skipped with a
-          # clear log and unsigned artifacts are produced — forks can
-          # still cut testable builds without provisioning Apple secrets.
+          # Runtime. When any are missing, signing is skipped with a clear
+          # log and unsigned artifacts are produced — forks can still cut
+          # testable builds without provisioning Apple secrets.
           APPLE_DEVELOPER_ID_CERT_BASE64:   ${{ secrets.APPLE_DEVELOPER_ID_CERT_BASE64 }}
           APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
           APPLE_DEVELOPER_ID_NAME:          ${{ secrets.APPLE_DEVELOPER_ID_NAME }}
           APPLE_TEAM_ID:                    ${{ secrets.APPLE_TEAM_ID }}
-          # Notarization secrets (also optional). When present alongside
-          # the signing secrets, the GUI is submitted to notarytool with
-          # --wait and the ticket is stapled. Daemon binaries cannot be
-          # stapled (Mach-O), so the daemon is signed but not notarized.
           APPLE_NOTARIZE_USER:     ${{ secrets.APPLE_NOTARIZE_USER }}
           APPLE_NOTARIZE_PASSWORD: ${{ secrets.APPLE_NOTARIZE_PASSWORD }}
         run: |
-          bash scripts/build-release.sh "$TAG" dist
+          bash scripts/build-release.sh "${{ needs.prepare.outputs.tag }}" dist
 
-      - name: Generate release notes
-        run: |
-          bash scripts/release-notes.sh "$TAG" \
-            | sed "s/VERSION/${TAG}/g" \
-            > release-notes.md
-          echo "--- release notes preview ---"
-          cat release-notes.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Build source tarball (preserved for downstream packagers)
-        run: |
-          tar --exclude='.git' --exclude='dist' --exclude='imessage-recovery' \
-              --exclude='**/.build' \
-              -czf "dist/imessage-unsent-${TAG}-source.tar.gz" .
-          ( cd dist && shasum -a 256 "imessage-unsent-${TAG}-source.tar.gz" \
-              > "imessage-unsent-${TAG}-source.tar.gz.sha256" )
+  # Final assembly + draft release publish runs on ubuntu — `gh` CLI is
+  # preinstalled on every GitHub-hosted runner, so cutting the draft does
+  # not require macOS.
+  publish:
+    name: Publish draft GitHub release
+    runs-on: ubuntu-latest
+    needs: [prepare, build-macos]
+    steps:
+      - name: Download release metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: release-metadata
+          path: staging/
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-artifacts
+          path: dist/
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          tag="${{ needs.prepare.outputs.tag }}"
           prerelease_flag=""
-          if [[ "$PRERELEASE" == "true" ]]; then
+          if [[ "${{ needs.prepare.outputs.prerelease }}" == "true" ]]; then
             prerelease_flag="--prerelease"
           fi
           # shellcheck disable=SC2086
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --notes-file release-notes.md \
+          gh release create "$tag" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "$tag" \
+            --notes-file "staging/release-notes.md" \
             --draft \
             $prerelease_flag \
+            "staging/imessage-unsent-${tag}-source.tar.gz" \
+            "staging/imessage-unsent-${tag}-source.tar.gz.sha256" \
             dist/*.tar.gz \
             dist/*.tar.gz.sha256 \
             dist/*.zip \
             dist/*.zip.sha256
-          echo "::notice::Draft release $TAG created. Review and publish from the GitHub Releases UI."
+          echo "::notice::Draft release $tag created. Review and publish from the GitHub Releases UI."
