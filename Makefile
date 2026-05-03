@@ -7,7 +7,7 @@ SHELL_SOURCES := scripts/*.sh scripts/lib/*.sh tests/fixtures/*.sh tests/bats/he
 .PHONY: fixture fixture-check shellcheck python-check bats python-test test \
 	daemon-build daemon-test daemon-install daemon-uninstall \
 	gui-build gui-test gui-run swift-test \
-	doctor \
+	doctor rc-smoke \
 	release release-notes
 
 fixture:
@@ -64,6 +64,18 @@ swift-test: daemon-test gui-test
 # GitHub issue.
 doctor:
 	bash scripts/app_doctor.sh
+
+# Local "release-candidate smoke" — runs shellcheck + both swift test suites,
+# builds the daemon tarball + GUI .app zip via build-release.sh, generates
+# release notes, runs app_doctor, and validates artifact integrity. Defaults
+# to a temp output dir wiped on success; pass VERSION=v0.4.0-rc1 to test a
+# real RC string and OUTPUT_DIR=dist (or set IMU_RC_KEEP_DIST=1) to keep
+# artifacts.
+#   make rc-smoke
+#   make rc-smoke VERSION=v0.4.0-rc1
+#   make rc-smoke VERSION=v0.4.0-rc1 OUTPUT_DIR=dist
+rc-smoke:
+	bash scripts/rc_smoke.sh $(VERSION) $(OUTPUT_DIR)
 
 # Build distributable release artifacts (daemon tarball + GUI .app zip + sha256s).
 # Usage: make release VERSION=v0.4.0

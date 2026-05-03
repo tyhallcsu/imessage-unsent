@@ -41,6 +41,8 @@ But SQLite doesn't overwrite pages in place — it writes new page images to a *
 - [Why the WAL vector works (byte-level)](#why-the-wal-vector-works-byte-level)
 - [Usage](#usage)
 - [Run the daemon and menu bar app](#run-the-daemon-and-menu-bar-app)
+- [Working-app checklist](#working-app-checklist)
+- [Release-candidate smoke](#release-candidate-smoke)
 - [Daemon control socket](#daemon-control-socket)
 - [Sanitized case study](#sanitized-case-study)
 - [Modes — Recover vs Restore](#modes--recover-vs-restore)
@@ -437,6 +439,29 @@ make daemon-build    # swift build daemon -c release (no install)
 make gui-build       # swift build gui -c release (no app bundle)
 make swift-test      # daemon + gui swift test in one shot
 ```
+
+## Working-app checklist
+
+A six-step sanity loop for taking imessage-unsent from "fresh clone" to "trusted local install" — and verifying it before cutting a release:
+
+1. `make daemon-install` — builds the daemon in release mode and bootstraps the LaunchAgent.
+2. Grant Full Disk Access to the **installed** daemon binary at `~/Library/Application Support/imessage-unsent/bin/imu-watcher` (System Settings → Privacy & Security → Full Disk Access).
+3. `make gui-run` — launches the menu-bar app.
+4. Click **Health Check…** in the menu — every row should be `pass` or `info`. Fix any `fail`/`warn` rows using the remediation text shown.
+5. If the GUI itself can't launch (Gatekeeper, FDA prompt loop), run `make doctor` for the same diagnostic in your terminal.
+6. Before cutting a release, run `make rc-smoke` to prove the build/package/diagnose chain works end-to-end (see [Release-candidate smoke](#release-candidate-smoke) below).
+
+## Release-candidate smoke
+
+`make rc-smoke` runs a non-destructive local smoke that builds the daemon tarball + GUI .app zip, generates release notes, runs `app_doctor.sh`, and validates artifact integrity (sha256 sidecars, expected files inside the tarball/zip):
+
+```bash
+make rc-smoke                              # uses VERSION=v0.0.0-smoke and a temp dir
+make rc-smoke VERSION=v0.4.0-rc1           # real RC string, still a temp dir
+make rc-smoke VERSION=v0.4.0-rc1 OUTPUT_DIR=dist  # keep artifacts in dist/
+```
+
+It prints a `[PASS]`/`[FAIL]`/`[SKIP]` summary table at the end and exits nonzero on any failure. It deliberately does **not** install the LaunchAgent, request Full Disk Access, modify `~/Library/Messages`, require Apple signing secrets, or publish a GitHub release. Useful overrides: `IMU_RC_SKIP_SWIFT=1`, `IMU_RC_SKIP_SHELLCHECK=1`, `IMU_RC_KEEP_DIST=1`.
 
 ## Daemon control socket
 
