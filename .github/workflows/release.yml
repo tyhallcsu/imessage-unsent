@@ -52,7 +52,24 @@ jobs:
           swift test --package-path daemon
           swift test --package-path gui
 
-      - name: Build release artifacts
+      - name: Build + sign + notarize release artifacts
+        env:
+          # Signing secrets (optional). When all four are present,
+          # scripts/sign-release.sh signs both the daemon binary and the
+          # GUI .app with the Developer ID Application cert and Hardened
+          # Runtime. When any are missing, signing is skipped with a
+          # clear log and unsigned artifacts are produced — forks can
+          # still cut testable builds without provisioning Apple secrets.
+          APPLE_DEVELOPER_ID_CERT_BASE64:   ${{ secrets.APPLE_DEVELOPER_ID_CERT_BASE64 }}
+          APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
+          APPLE_DEVELOPER_ID_NAME:          ${{ secrets.APPLE_DEVELOPER_ID_NAME }}
+          APPLE_TEAM_ID:                    ${{ secrets.APPLE_TEAM_ID }}
+          # Notarization secrets (also optional). When present alongside
+          # the signing secrets, the GUI is submitted to notarytool with
+          # --wait and the ticket is stapled. Daemon binaries cannot be
+          # stapled (Mach-O), so the daemon is signed but not notarized.
+          APPLE_NOTARIZE_USER:     ${{ secrets.APPLE_NOTARIZE_USER }}
+          APPLE_NOTARIZE_PASSWORD: ${{ secrets.APPLE_NOTARIZE_PASSWORD }}
         run: |
           bash scripts/build-release.sh "$TAG" dist
 

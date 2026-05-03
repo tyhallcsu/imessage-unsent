@@ -124,3 +124,58 @@ load helpers
   [[ "$output" == *"All commits (first release)"* ]]
   [[ "$output" == *"initial release"* ]]
 }
+
+@test "sign-release.sh requires both arguments" {
+  run bash "$REPO_DIR/scripts/sign-release.sh"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"usage:"* ]]
+
+  run bash "$REPO_DIR/scripts/sign-release.sh" "$BATS_TEST_TMPDIR/some.app"
+  [ "$status" -eq 2 ]
+}
+
+@test "sign-release.sh rejects missing GUI .app path" {
+  local app="$BATS_TEST_TMPDIR/Missing.app"
+  local daemon="$BATS_TEST_TMPDIR/imu-watcher"
+  : > "$daemon"; chmod +x "$daemon"
+  run bash "$REPO_DIR/scripts/sign-release.sh" "$app" "$daemon"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"expected GUI .app at"* ]]
+}
+
+@test "sign-release.sh rejects non-executable daemon path" {
+  local app="$BATS_TEST_TMPDIR/IMUMenuBar.app"; mkdir -p "$app"
+  local daemon="$BATS_TEST_TMPDIR/imu-watcher"; : > "$daemon"  # not chmod +x
+  run bash "$REPO_DIR/scripts/sign-release.sh" "$app" "$daemon"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"expected daemon binary at"* ]]
+}
+
+@test "sign-release.sh skips with clear log when no signing creds present" {
+  local app="$BATS_TEST_TMPDIR/IMUMenuBar.app"; mkdir -p "$app/Contents/MacOS"
+  local daemon="$BATS_TEST_TMPDIR/imu-watcher"; : > "$daemon"; chmod +x "$daemon"
+
+  run bash -c "
+    unset APPLE_DEVELOPER_ID_CERT_BASE64 APPLE_DEVELOPER_ID_CERT_PASSWORD APPLE_DEVELOPER_ID_NAME APPLE_TEAM_ID APPLE_NOTARIZE_USER APPLE_NOTARIZE_PASSWORD
+    bash '$REPO_DIR/scripts/sign-release.sh' '$app' '$daemon'
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Skipping codesign + notarize"* ]]
+  [[ "$output" == *"APPLE_DEVELOPER_ID_CERT_BASE64"* ]]
+  [[ "$output" == *"docs/code-signing.md"* ]]
+}
+
+@test "sign-release.sh names every missing signing var when partially configured" {
+  local app="$BATS_TEST_TMPDIR/IMUMenuBar.app"; mkdir -p "$app/Contents/MacOS"
+  local daemon="$BATS_TEST_TMPDIR/imu-watcher"; : > "$daemon"; chmod +x "$daemon"
+
+  run bash -c "
+    unset APPLE_DEVELOPER_ID_CERT_BASE64 APPLE_DEVELOPER_ID_CERT_PASSWORD APPLE_DEVELOPER_ID_NAME APPLE_TEAM_ID
+    export APPLE_DEVELOPER_ID_NAME='Developer ID Application: Test (TEST123456)'
+    bash '$REPO_DIR/scripts/sign-release.sh' '$app' '$daemon'
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"APPLE_DEVELOPER_ID_CERT_BASE64"* ]]
+  [[ "$output" == *"APPLE_DEVELOPER_ID_CERT_PASSWORD"* ]]
+  [[ "$output" == *"APPLE_TEAM_ID"* ]]
+}
