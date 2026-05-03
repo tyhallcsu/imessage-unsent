@@ -252,7 +252,9 @@ public final class ControlServer {
       "recovery_count": snap.recoveryCount,
       "last_error": snap.lastError as Any? ?? NSNull(),
       "data_dir": dataDir.path,
-      "notifications_show": notificationsShow
+      "notifications_show": notificationsShow,
+      "chat_db_readable": snap.chatDBReadable as Any? ?? NSNull(),
+      "chat_db_probed_at": snap.chatDBProbedAt.map(Self.isoString) as Any? ?? NSNull()
     ]
     return encodeJSON(["ok": true, "status": status])
   }

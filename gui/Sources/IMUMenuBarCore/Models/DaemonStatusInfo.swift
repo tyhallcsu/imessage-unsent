@@ -11,6 +11,12 @@ public struct DaemonStatusInfo: Codable, Equatable {
   public let lastError: String?
   public let dataDir: String
   public let notificationsShow: Bool
+  /// Result of the daemon's most recent `open(2)` against `chat.db`. Distinct
+  /// from `lastError` because a stat-only success can coexist with an
+  /// open-failure under TCC (see issue #59). Nil means the daemon has not yet
+  /// probed (or the daemon is older than the field landing).
+  public let chatDBReadable: Bool?
+  public let chatDBProbedAt: String?
 
   enum CodingKeys: String, CodingKey {
     case state
@@ -23,6 +29,8 @@ public struct DaemonStatusInfo: Codable, Equatable {
     case lastError = "last_error"
     case dataDir = "data_dir"
     case notificationsShow = "notifications_show"
+    case chatDBReadable = "chat_db_readable"
+    case chatDBProbedAt = "chat_db_probed_at"
   }
 
   public init(
@@ -35,7 +43,9 @@ public struct DaemonStatusInfo: Codable, Equatable {
     recoveryCount: Int,
     lastError: String?,
     dataDir: String,
-    notificationsShow: Bool
+    notificationsShow: Bool,
+    chatDBReadable: Bool? = nil,
+    chatDBProbedAt: String? = nil
   ) {
     self.state = state
     self.version = version
@@ -47,6 +57,24 @@ public struct DaemonStatusInfo: Codable, Equatable {
     self.lastError = lastError
     self.dataDir = dataDir
     self.notificationsShow = notificationsShow
+    self.chatDBReadable = chatDBReadable
+    self.chatDBProbedAt = chatDBProbedAt
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    state = try container.decode(String.self, forKey: .state)
+    version = try container.decode(String.self, forKey: .version)
+    startedAt = try container.decode(String.self, forKey: .startedAt)
+    uptimeSeconds = try container.decode(Int.self, forKey: .uptimeSeconds)
+    lastWalChangeAt = try container.decodeIfPresent(String.self, forKey: .lastWalChangeAt)
+    lastWalSize = try container.decode(Int64.self, forKey: .lastWalSize)
+    recoveryCount = try container.decode(Int.self, forKey: .recoveryCount)
+    lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
+    dataDir = try container.decode(String.self, forKey: .dataDir)
+    notificationsShow = try container.decode(Bool.self, forKey: .notificationsShow)
+    chatDBReadable = try container.decodeIfPresent(Bool.self, forKey: .chatDBReadable)
+    chatDBProbedAt = try container.decodeIfPresent(String.self, forKey: .chatDBProbedAt)
   }
 }
 

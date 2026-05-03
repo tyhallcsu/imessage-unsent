@@ -14,6 +14,35 @@ final class DaemonStatusBoardTests: XCTestCase {
     XCTAssertEqual(snap.lastWalSize, 0)
     XCTAssertNil(snap.lastWalChangeAt)
     XCTAssertNil(snap.lastError)
+    XCTAssertNil(snap.chatDBReadable)
+    XCTAssertNil(snap.chatDBProbedAt)
+  }
+
+  func testRecordChatDBProbeStoresLatestResult() {
+    let board = DaemonStatusBoard()
+    let firstProbe = Date(timeIntervalSince1970: 1_800_000_100)
+
+    board.recordChatDBProbe(readable: false, at: firstProbe)
+    var snap = board.snapshot()
+    XCTAssertEqual(snap.chatDBReadable, false)
+    XCTAssertEqual(snap.chatDBProbedAt, firstProbe)
+
+    let secondProbe = Date(timeIntervalSince1970: 1_800_000_200)
+    board.recordChatDBProbe(readable: true, at: secondProbe)
+    snap = board.snapshot()
+    XCTAssertEqual(snap.chatDBReadable, true)
+    XCTAssertEqual(snap.chatDBProbedAt, secondProbe)
+  }
+
+  func testRecordStartClearsChatDBProbe() {
+    let board = DaemonStatusBoard()
+    board.recordChatDBProbe(readable: true)
+    XCTAssertEqual(board.snapshot().chatDBReadable, true)
+
+    board.recordStart()
+    let snap = board.snapshot()
+    XCTAssertNil(snap.chatDBReadable)
+    XCTAssertNil(snap.chatDBProbedAt)
   }
 
   func testRecordWalChangeUpdatesSizeAndTimestamp() {

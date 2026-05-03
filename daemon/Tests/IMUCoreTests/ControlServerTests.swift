@@ -85,6 +85,19 @@ final class ControlServerTests: XCTestCase {
     XCTAssertNotNil(status["last_wal_change_at"] as? String)
     XCTAssertTrue(status["last_error"] is NSNull)
     XCTAssertGreaterThanOrEqual(status["uptime_seconds"] as? Int ?? -1, 0)
+    // No probe has been recorded yet → fields are nullable JSON null.
+    XCTAssertTrue(status["chat_db_readable"] is NSNull)
+    XCTAssertTrue(status["chat_db_probed_at"] is NSNull)
+  }
+
+  func testStatusResponseExposesChatDBProbeWhenRecorded() throws {
+    let probedAt = Date(timeIntervalSince1970: 1_800_000_750)
+    statusBoard.recordChatDBProbe(readable: false, at: probedAt)
+
+    let response = try roundTrip(#"{"op":"status"}"#)
+    let status = try XCTUnwrap(response["status"] as? [String: Any])
+    XCTAssertEqual(status["chat_db_readable"] as? Bool, false)
+    XCTAssertNotNil(status["chat_db_probed_at"] as? String)
   }
 
   func testRecentResponseListsArchive() throws {
