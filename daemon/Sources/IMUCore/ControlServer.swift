@@ -164,6 +164,12 @@ public final class ControlServer {
         // EAGAIN / EWOULDBLOCK once the pending queue is drained.
         break
       }
+      // accept(2) on Darwin inherits the listen socket's O_NONBLOCK onto the
+      // accepted FD. We want blocking semantics on the client FD so SO_RCVTIMEO
+      // governs read timeouts instead of recv() returning EAGAIN immediately.
+      let clientFlags = fcntl(clientFD, F_GETFL, 0)
+      _ = fcntl(clientFD, F_SETFL, clientFlags & ~O_NONBLOCK)
+
       if clientSemaphore.wait(timeout: .now()) == .timedOut {
         Darwin.close(clientFD)
         continue

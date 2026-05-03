@@ -180,7 +180,7 @@ public struct ConfigStore {
   }
 }
 
-public func expandTilde(_ path: String, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+public func expandTilde(_ path: String, home: URL = imuUserHomeDirectory()) -> URL {
   if path == "~" {
     return home
   }
@@ -190,7 +190,7 @@ public func expandTilde(_ path: String, home: URL = FileManager.default.homeDire
   return URL(fileURLWithPath: path)
 }
 
-public func defaultConfigURL(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+public func defaultConfigURL(home: URL = imuUserHomeDirectory()) -> URL {
   home
     .appendingPathComponent(".config", isDirectory: true)
     .appendingPathComponent("imessage-unsent", isDirectory: true)
