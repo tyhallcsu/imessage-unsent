@@ -5,12 +5,14 @@ import IMUCore
 final class WatcherDaemon {
   private let queue = DispatchQueue(label: "com.imu.watcher.daemon")
   private let stopSemaphore = DispatchSemaphore(value: 0)
+  private let statusBoard = DaemonStatusBoard()
   private var heartbeatTimer: DispatchSourceTimer?
   private var signalSources: [DispatchSourceSignal] = []
   private var walWatcher: FSWatcher?
   private var detector: RetractionDetector?
   private var archivePipeline: ArchivePipeline?
   private var notifier: RecoveryNotifier?
+  private var controlServer: ControlServer?
   private var lastWalSize: Int64 = 0
   private var stopped = false
 
@@ -20,13 +22,32 @@ final class WatcherDaemon {
     let dataDir = expandTilde(config.dataDir)
     try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dataDir.path)
+    let archivesDir = dataDir.appendingPathComponent("archives", isDirectory: true)
     archivePipeline = ArchivePipeline(
-      archivesDir: dataDir.appendingPathComponent("archives", isDirectory: true),
+      archivesDir: archivesDir,
       retentionLimit: config.archiveRetention
     )
     notifier = RecoveryNotifier(config: config.notifications)
 
-    log("imu-watcher starting log_level=\(config.logLevel) data_dir=\(dataDir.path)")
+    statusBoard.recordStart()
+    let server = ControlServer(
+      socketPath: dataDir.appendingPathComponent("daemon.sock", isDirectory: false),
+      statusBoard: statusBoard,
+      historyReader: ArchiveHistoryReader(
+        archivesDir: archivesDir,
+        onSkip: { [weak self] name, reason in
+          self?.log("history skip dir=\(name) reason=\(reason)")
+        }
+      ),
+      version: imuDaemonVersion,
+      dataDir: dataDir,
+      notificationsShow: config.notifications.show,
+      logger: { [weak self] message in self?.log(message) }
+    )
+    try server.start()
+    controlServer = server
+
+    log("imu-watcher starting log_level=\(config.logLevel) data_dir=\(dataDir.path) version=\(imuDaemonVersion)")
     try startWalWatcher()
     installSignalHandlers()
     startHeartbeat()
@@ -90,6 +111,7 @@ final class WatcherDaemon {
     lastWalSize = size
     let deltaText = delta >= 0 ? "+\(delta)" : "\(delta)"
     log("wal change size=\(size) delta=\(deltaText)")
+    statusBoard.recordWalChange(size: size)
 
     guard let detector else {
       return
@@ -110,14 +132,17 @@ final class WatcherDaemon {
           let complete = try archivePipeline.archive(event: event)
           log("recovery complete archive_dir=\(complete.archiveDir.path) recovered=\(complete.recovered)")
           notifier?.notify(complete)
+          statusBoard.recordRecovery()
           processedEvents.append(event)
         } catch {
           log("archive error rowid=\(event.rowid) error=\(error.localizedDescription)")
+          statusBoard.recordError(error.localizedDescription)
         }
       }
       try detector.markProcessed(processedEvents)
     } catch {
       log("detector error=\(error.localizedDescription)")
+      statusBoard.recordError(error.localizedDescription)
     }
   }
 
@@ -132,6 +157,8 @@ final class WatcherDaemon {
     detector = nil
     archivePipeline = nil
     notifier = nil
+    controlServer?.stop()
+    controlServer = nil
     log("shutdown requested reason=\(reason)")
     stopSemaphore.signal()
   }
