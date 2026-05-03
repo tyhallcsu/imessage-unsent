@@ -6,19 +6,28 @@ public struct DaemonStatusSnapshot: Equatable {
   public let lastWalSize: Int64
   public let recoveryCount: Int
   public let lastError: String?
+  /// Result of the daemon's most recent attempt to open `chat.db`. Distinct
+  /// from `lastError` because a stat-only success can coexist with an
+  /// open-failure under TCC; nil means the daemon has not yet probed.
+  public let chatDBReadable: Bool?
+  public let chatDBProbedAt: Date?
 
   public init(
     startedAt: Date,
     lastWalChangeAt: Date?,
     lastWalSize: Int64,
     recoveryCount: Int,
-    lastError: String?
+    lastError: String?,
+    chatDBReadable: Bool? = nil,
+    chatDBProbedAt: Date? = nil
   ) {
     self.startedAt = startedAt
     self.lastWalChangeAt = lastWalChangeAt
     self.lastWalSize = lastWalSize
     self.recoveryCount = recoveryCount
     self.lastError = lastError
+    self.chatDBReadable = chatDBReadable
+    self.chatDBProbedAt = chatDBProbedAt
   }
 }
 
@@ -29,6 +38,8 @@ public final class DaemonStatusBoard {
   private var lastWalSize: Int64 = 0
   private var recoveryCount: Int = 0
   private var lastError: String?
+  private var chatDBReadable: Bool?
+  private var chatDBProbedAt: Date?
 
   public init(now: Date = Date()) {
     self.startedAt = now
@@ -42,6 +53,8 @@ public final class DaemonStatusBoard {
     lastWalSize = 0
     recoveryCount = 0
     lastError = nil
+    chatDBReadable = nil
+    chatDBProbedAt = nil
   }
 
   public func recordWalChange(size: Int64, at date: Date = Date()) {
@@ -64,6 +77,13 @@ public final class DaemonStatusBoard {
     lastError = message
   }
 
+  public func recordChatDBProbe(readable: Bool, at date: Date = Date()) {
+    lock.lock()
+    defer { lock.unlock() }
+    chatDBReadable = readable
+    chatDBProbedAt = date
+  }
+
   public func snapshot() -> DaemonStatusSnapshot {
     lock.lock()
     defer { lock.unlock() }
@@ -72,7 +92,9 @@ public final class DaemonStatusBoard {
       lastWalChangeAt: lastWalChangeAt,
       lastWalSize: lastWalSize,
       recoveryCount: recoveryCount,
-      lastError: lastError
+      lastError: lastError,
+      chatDBReadable: chatDBReadable,
+      chatDBProbedAt: chatDBProbedAt
     )
   }
 }

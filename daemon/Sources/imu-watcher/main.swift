@@ -54,6 +54,7 @@ final class WatcherDaemon {
     log("imu-watcher starting log_level=\(config.logLevel) data_dir=\(dataDir.path) version=\(imuDaemonVersion)")
     try startWalWatcher()
     installSignalHandlers()
+    probeChatDBAccess()
     startHeartbeat()
     stopSemaphore.wait()
     log("imu-watcher stopped")
@@ -91,9 +92,26 @@ final class WatcherDaemon {
     timer.schedule(deadline: .now(), repeating: .seconds(60))
     timer.setEventHandler { [weak self] in
       self?.log("heartbeat status=idle")
+      self?.probeChatDBAccess()
     }
     timer.resume()
     heartbeatTimer = timer
+  }
+
+  /// Probes the daemon's TCC permission for `chat.db` by attempting an
+  /// `open(2)` and immediate close. Stat-only access can succeed under TCC
+  /// while `open` still fails (#59 surfaced this), so we record the open
+  /// result on the status board for the GUI to display.
+  private func probeChatDBAccess() {
+    let url = defaultMessagesChatDBURL()
+    do {
+      let handle = try FileHandle(forReadingFrom: url)
+      try handle.close()
+      statusBoard.recordChatDBProbe(readable: true)
+    } catch {
+      statusBoard.recordChatDBProbe(readable: false)
+      log("chat.db probe failed error=\(error.localizedDescription)")
+    }
   }
 
   private func startWalWatcher() throws {

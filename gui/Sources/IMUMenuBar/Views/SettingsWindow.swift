@@ -52,7 +52,52 @@ struct SettingsWindow: View {
       if let lastError = model.statusInfo?.lastError, !lastError.isEmpty {
         infoRow(label: "Last error", value: lastError)
       }
+      fullDiskAccessRow
       restartRow
+    }
+  }
+
+  /// Surfaces the daemon's own `chat.db` open(2) probe so users can spot when
+  /// FDA needs a refresh (typical after `make daemon-install` rebuilds the
+  /// binary's inode/cdhash). The probe runs in the daemon at startup and
+  /// every minute thereafter; we just render its result.
+  @ViewBuilder
+  private var fullDiskAccessRow: some View {
+    HStack {
+      Text("Full Disk Access")
+        .frame(width: 180, alignment: .leading)
+
+      switch model.statusInfo?.chatDBReadable {
+      case .some(true):
+        Label("Granted — daemon can read chat.db", systemImage: "checkmark.circle.fill")
+          .foregroundStyle(.green)
+          .font(.callout)
+          .lineLimit(2)
+      case .some(false):
+        Label("Denied — open(2) on chat.db fails", systemImage: "exclamationmark.triangle.fill")
+          .foregroundStyle(.red)
+          .font(.callout)
+          .lineLimit(2)
+      case .none:
+        Label("Probing…", systemImage: "hourglass")
+          .foregroundStyle(.secondary)
+          .font(.callout)
+      }
+
+      Spacer()
+
+      if model.statusInfo?.chatDBReadable == false {
+        Button("Open Full Disk Access…") {
+          openFullDiskAccessSettings()
+        }
+        .help("Opens System Settings → Privacy & Security → Full Disk Access. Toggle imu-watcher off then back on to refresh the TCC grant after a rebuild.")
+      }
+    }
+  }
+
+  private func openFullDiskAccessSettings() {
+    if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles") {
+      NSWorkspace.shared.open(url)
     }
   }
 
