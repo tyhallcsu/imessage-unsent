@@ -1,0 +1,164 @@
+import Foundation
+
+/// Issue #67. Captures `chat.db-wal` to a rolling on-disk buffer every time
+/// it changes, so when a retraction is detected the daemon can scan a window
+/// of pre-retract WAL states — not just the live WAL, which may have been
+/// checkpointed away by SQLite before we get a chance to copy it.
+///
+/// Snapshots live at `<storeDir>/<UTC-iso-timestamp>-<size>.db-wal`. Retention
+/// is bounded by both a count cap (default 30) and a max age (default 5 min).
+/// The 2-minute iMessage unsend window is the practical upper bound on how
+/// far back we ever need to look.
+public final class WALSnapshotter {
+  public let walURL: URL
+  public let storeDir: URL
+  public let retentionLimit: Int
+  public let maxAge: TimeInterval
+
+  private let queue: DispatchQueue
+  private let fileManager: FileManager
+  private let clock: () -> Date
+  private var lastSnapshotSize: Int64 = -1
+
+  public init(
+    walURL: URL = defaultMessagesWalURL(),
+    storeDir: URL,
+    retentionLimit: Int = 30,
+    maxAge: TimeInterval = 5 * 60,
+    fileManager: FileManager = .default,
+    clock: @escaping () -> Date = Date.init
+  ) {
+    self.walURL = walURL.standardizedFileURL
+    self.storeDir = storeDir.standardizedFileURL
+    self.retentionLimit = retentionLimit
+    self.maxAge = maxAge
+    self.queue = DispatchQueue(label: "com.imu.watcher.walsnap")
+    self.fileManager = fileManager
+    self.clock = clock
+  }
+
+  /// Snapshots the current WAL to the rolling buffer. No-op when the WAL
+  /// size is unchanged from the last successful snapshot, which keeps us
+  /// from filling the disk during quiet periods where FSEvents fires but
+  /// nothing actually changed in the file.
+  @discardableResult
+  public func snapshot() throws -> URL? {
+    try queue.sync {
+      try ensureStoreDir()
+      guard fileManager.fileExists(atPath: walURL.path) else {
+        return nil
+      }
+      let currentSize = walFileSize()
+      if currentSize <= 0 || currentSize == lastSnapshotSize {
+        return nil
+      }
+
+      let now = clock()
+      let dest = storeDir.appendingPathComponent(
+        "\(Self.fileTimestamp(now))-\(currentSize).db-wal",
+        isDirectory: false
+      )
+      // Same-millisecond duplicate (rare; protect against it anyway).
+      if fileManager.fileExists(atPath: dest.path) {
+        return nil
+      }
+
+      try fileManager.copyItem(at: walURL, to: dest)
+      // Pin the destination's mtime to `now` from our clock — `copyItem`
+      // sets the new file's mtime to wall-clock time, which would diverge
+      // from the injected clock under test and break maxAge math.
+      try fileManager.setAttributes(
+        [.posixPermissions: 0o600, .modificationDate: now],
+        ofItemAtPath: dest.path
+      )
+      lastSnapshotSize = currentSize
+      try trim(now: now)
+      return dest
+    }
+  }
+
+  /// Copies every snapshot currently in the rolling buffer into a fresh
+  /// `wal-history/` directory under `destDir`. Used by `ArchivePipeline` to
+  /// preserve the buffer state alongside each archived retraction.
+  public func archiveTo(_ destDir: URL) throws {
+    try queue.sync {
+      try fileManager.createDirectory(
+        at: destDir,
+        withIntermediateDirectories: true,
+        attributes: [.posixPermissions: 0o700]
+      )
+      for snap in try listSnapshots() {
+        let dest = destDir.appendingPathComponent(snap.lastPathComponent, isDirectory: false)
+        if fileManager.fileExists(atPath: dest.path) {
+          try fileManager.removeItem(at: dest)
+        }
+        try fileManager.copyItem(at: snap, to: dest)
+      }
+    }
+  }
+
+  public func snapshotCount() -> Int {
+    queue.sync {
+      (try? listSnapshots())?.count ?? 0
+    }
+  }
+
+  // MARK: - Internals
+
+  private func ensureStoreDir() throws {
+    try fileManager.createDirectory(
+      at: storeDir,
+      withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700]
+    )
+  }
+
+  private func walFileSize() -> Int64 {
+    guard
+      let attrs = try? fileManager.attributesOfItem(atPath: walURL.path),
+      let size = attrs[.size] as? NSNumber
+    else {
+      return 0
+    }
+    return size.int64Value
+  }
+
+  private func listSnapshots() throws -> [URL] {
+    guard fileManager.fileExists(atPath: storeDir.path) else { return [] }
+    return try fileManager.contentsOfDirectory(at: storeDir, includingPropertiesForKeys: nil)
+      .filter { $0.lastPathComponent.hasSuffix(".db-wal") }
+      .sorted { $0.lastPathComponent < $1.lastPathComponent }  // oldest first
+  }
+
+  private func trim(now: Date) throws {
+    let snapshots = try listSnapshots()
+    let countCut = max(0, snapshots.count - retentionLimit)
+    for url in snapshots.prefix(countCut) {
+      try? fileManager.removeItem(at: url)
+    }
+    let cutoff = now.addingTimeInterval(-maxAge)
+    for url in snapshots.dropFirst(countCut) {
+      guard
+        let attrs = try? fileManager.attributesOfItem(atPath: url.path),
+        let mtime = attrs[.modificationDate] as? Date
+      else {
+        continue
+      }
+      if mtime < cutoff {
+        try? fileManager.removeItem(at: url)
+      }
+    }
+  }
+
+  private static let timestampFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "yyyy-MM-dd'T'HHmmss'.'SSS'Z'"
+    return formatter
+  }()
+
+  static func fileTimestamp(_ date: Date) -> String {
+    timestampFormatter.string(from: date)
+  }
+}
