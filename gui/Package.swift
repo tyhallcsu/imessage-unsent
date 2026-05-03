@@ -10,7 +10,10 @@ let package = Package(
     .executable(name: "IMUMenuBar", targets: ["IMUMenuBar"])
   ],
   targets: [
-    .target(name: "IMUMenuBarCore"),
+    .target(
+      name: "IMUMenuBarCore",
+      linkerSettings: [.linkedFramework("Contacts")]
+    ),
     .executableTarget(name: "IMUMenuBar", dependencies: ["IMUMenuBarCore"]),
     .testTarget(name: "IMUMenuBarCoreTests", dependencies: ["IMUMenuBarCore"])
   ]

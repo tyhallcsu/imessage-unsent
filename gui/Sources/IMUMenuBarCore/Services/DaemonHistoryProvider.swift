@@ -1,5 +1,29 @@
 import Foundation
 
+public protocol RecoveryEntryProviding {
+  func recentEntries(limit: Int) -> [ArchiveHistoryEntryDTO]
+}
+
+public struct EmptyRecoveryEntryProvider: RecoveryEntryProviding {
+  public init() {}
+
+  public func recentEntries(limit _: Int) -> [ArchiveHistoryEntryDTO] {
+    []
+  }
+}
+
+public struct DaemonRecoveryEntryProvider: RecoveryEntryProviding {
+  private let client: DaemonControlClienting
+
+  public init(client: DaemonControlClienting) {
+    self.client = client
+  }
+
+  public func recentEntries(limit: Int) -> [ArchiveHistoryEntryDTO] {
+    client.recent(limit: limit)
+  }
+}
+
 public struct DaemonHistoryProvider: RecoveryHistoryProviding {
   private let client: DaemonControlClienting
   private let now: () -> Date

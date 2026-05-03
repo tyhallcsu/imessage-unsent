@@ -91,4 +91,8 @@ private final class StubControlClient: DaemonControlClienting {
   func recent(limit: Int) -> [ArchiveHistoryEntryDTO] {
     Array(entries.prefix(limit))
   }
+
+  func delete(id _: String) -> Bool {
+    false
+  }
 }
