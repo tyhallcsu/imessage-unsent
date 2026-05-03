@@ -93,4 +93,52 @@ final class ConfigStoreTests: XCTestCase {
       "non-boolean restore_mode values must fall back to the safe default"
     )
   }
+
+  func testSerializeRoundTripsAllFields() {
+    let original = DaemonConfig(
+      logLevel: "debug",
+      dataDir: "~/Library/Application Support/imessage-unsent-test",
+      archiveRetention: 250,
+      notifications: NotificationConfig(
+        show: false,
+        previewChars: 120,
+        webhook: "https://example.test/hook?token=abc",
+        webhookSigningSecret: "s3cret-with-\"quote\"-and-\\backslash"
+      ),
+      experimental: ExperimentalConfig(restoreMode: true)
+    )
+
+    let text = ConfigStore.serialize(original)
+    let parsed = ConfigStore.parse(text)
+
+    XCTAssertEqual(parsed, original)
+  }
+
+  func testSerializeIsIdempotent() {
+    let original = DaemonConfig(
+      notifications: NotificationConfig(show: true, previewChars: 80)
+    )
+    let first = ConfigStore.serialize(original)
+    let second = ConfigStore.serialize(ConfigStore.parse(first))
+    XCTAssertEqual(first, second, "serialize → parse → serialize must be a fixed point")
+  }
+
+  func testSaveCreatesParentDirectoryAndPersistsConfig() throws {
+    let workDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let nested = workDir.appendingPathComponent("nested/.config/imessage-unsent", isDirectory: true)
+    let url = nested.appendingPathComponent("config.toml", isDirectory: false)
+    defer { try? FileManager.default.removeItem(at: workDir) }
+
+    let store = ConfigStore(url: url)
+    let config = DaemonConfig(
+      logLevel: "warn",
+      notifications: NotificationConfig(show: false, previewChars: 42)
+    )
+    try store.save(config)
+
+    XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    let loaded = try store.load()
+    XCTAssertEqual(loaded, config)
+  }
 }
