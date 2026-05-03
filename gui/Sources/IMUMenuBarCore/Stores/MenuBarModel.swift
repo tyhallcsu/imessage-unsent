@@ -12,24 +12,41 @@ public struct EmptyRecoveryHistoryProvider: RecoveryHistoryProviding {
   }
 }
 
+public struct NoArchiveDeleter: ArchiveDeleting {
+  public init() {}
+  public func deleteArchive(id _: String) -> Bool { false }
+}
+
 @MainActor
 public final class MenuBarModel: ObservableObject {
   @Published public private(set) var status: DaemonStatus = .idle
   @Published public private(set) var statusInfo: DaemonStatusInfo?
   @Published public private(set) var recentRecoveries: [RecoverySummary] = []
+  @Published public private(set) var recentEntries: [ArchiveHistoryEntryDTO] = []
+  @Published public var searchText: String = ""
+
+  public let contactsResolver: ContactsResolving
 
   private let pinger: DaemonPinging
   private let historyProvider: RecoveryHistoryProviding
+  private let entryProvider: RecoveryEntryProviding
+  private let archiveDeleter: ArchiveDeleting
   private let statusProvider: (() -> DaemonStatusInfo?)?
   private var timer: Timer?
 
   public init(
     pinger: DaemonPinging,
     historyProvider: RecoveryHistoryProviding = EmptyRecoveryHistoryProvider(),
+    entryProvider: RecoveryEntryProviding = EmptyRecoveryEntryProvider(),
+    archiveDeleter: ArchiveDeleting = NoArchiveDeleter(),
+    contactsResolver: ContactsResolving = NoContactsResolver(),
     statusProvider: (() -> DaemonStatusInfo?)? = nil
   ) {
     self.pinger = pinger
     self.historyProvider = historyProvider
+    self.entryProvider = entryProvider
+    self.archiveDeleter = archiveDeleter
+    self.contactsResolver = contactsResolver
     self.statusProvider = statusProvider
   }
 
@@ -38,6 +55,9 @@ public final class MenuBarModel: ObservableObject {
     self.init(
       pinger: client,
       historyProvider: DaemonHistoryProvider(client: client),
+      entryProvider: DaemonRecoveryEntryProvider(client: client),
+      archiveDeleter: DaemonArchiveDeleter(client: client),
+      contactsResolver: CNContactsResolver(),
       statusProvider: { client.status() }
     )
   }
@@ -65,6 +85,32 @@ public final class MenuBarModel: ObservableObject {
       status = pinger.ping() ? .watching : .down
     }
     recentRecoveries = Array(historyProvider.recentRecoveries(limit: 5).prefix(5))
+    recentEntries = entryProvider.recentEntries(limit: 50)
+  }
+
+  /// Filtered slice of `recentEntries` honoring `searchText`. The match is
+  /// case-insensitive on the handle OR (when Contacts is available) on the
+  /// resolved contact name.
+  public var filteredEntries: [ArchiveHistoryEntryDTO] {
+    let needle = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if needle.isEmpty { return recentEntries }
+    return recentEntries.filter { entry in
+      if entry.handle.lowercased().contains(needle) { return true }
+      if let name = contactsResolver.displayName(forHandle: entry.handle),
+         name.lowercased().contains(needle) {
+        return true
+      }
+      return false
+    }
+  }
+
+  /// Removes the archive via the daemon and refreshes local state on success.
+  /// Returns whether the daemon reported success.
+  @discardableResult
+  public func delete(id: String) -> Bool {
+    guard archiveDeleter.deleteArchive(id: id) else { return false }
+    refresh()
+    return true
   }
 
   private func mapState(_ raw: String) -> DaemonStatus {

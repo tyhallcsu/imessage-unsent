@@ -16,6 +16,8 @@
   <true/>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>NSContactsUsageDescription</key>
+  <string>imessage-unsent shows contact names and avatars for recovered messages by phone number. The lookup is read-only and never leaves your Mac.</string>
   <key>CFBundleURLTypes</key>
   <array>
     <dict>

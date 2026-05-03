@@ -225,10 +225,12 @@ public final class ControlServer {
       let raw = (object["limit"] as? Int) ?? 5
       let limit = max(1, min(50, raw))
       return makeRecent(limit: limit)
+    case "delete":
+      return makeDelete(id: object["id"] as? String)
     default:
       return makeError(
         code: "read_only",
-        message: "op \(op) is not permitted: control server is read-only"
+        message: "op \(op) is not permitted: control server only allows ping/status/recent/delete"
       )
     }
   }
@@ -270,6 +272,31 @@ public final class ControlServer {
       ]
     }
     return encodeJSON(["ok": true, "recoveries": recoveries])
+  }
+
+  private func makeDelete(id: String?) -> Data {
+    guard let id, !id.isEmpty else {
+      return makeError(code: "bad_request", message: "missing or empty id")
+    }
+    let nsId = id as NSString
+    let isWellFormed = ArchiveHistoryReader.archiveDirectoryNamePattern.firstMatch(
+      in: id,
+      range: NSRange(location: 0, length: nsId.length)
+    ) != nil
+    guard isWellFormed else {
+      return makeError(code: "bad_request", message: "invalid archive id")
+    }
+    let target = historyReader.archivesDir.appendingPathComponent(id, isDirectory: true)
+    var isDir: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: target.path, isDirectory: &isDir), isDir.boolValue else {
+      return makeError(code: "not_found", message: "archive not found")
+    }
+    do {
+      try FileManager.default.removeItem(at: target)
+    } catch {
+      return makeError(code: "internal_error", message: "delete failed: \(error.localizedDescription)")
+    }
+    return encodeJSON(["ok": true, "deleted": id])
   }
 
   private func makeError(code: String, message: String) -> Data {
