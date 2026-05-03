@@ -34,6 +34,15 @@ The author does not condone, and will not provide support for, any use that viol
 
 If you find a defect in the recovery scripts (e.g., a command-injection bug in the bash wrapper, a path-traversal bug in the Python decoder, a way the script could damage `chat.db` despite operating only on snapshot copies), please open a GitHub issue or email the maintainer. Do not include real `chat.db` contents in the report.
 
+## Daemon control socket
+
+The watcher daemon serves a Unix-domain socket at `~/Library/Application Support/imessage-unsent/daemon.sock` for the menu-bar GUI to read status and the recent-recoveries list. Threat model:
+
+- The socket is created with mode `0600` and lives inside `~/Library/Application Support/imessage-unsent/` (also `0700`). Only your user can connect; another local user account on the same Mac cannot.
+- The protocol is a hard allowlist (`ping`, `status`, `recent`). Anything else returns `{"ok":false,"error":{"code":"read_only",...}}`. There is no command surface that mutates `chat.db`, the daemon config, or anything on disk.
+- The `recent` response carries the **recovered plaintext** of unsent messages — the same data already on disk under `~/Library/Application Support/imessage-unsent/archives/<dir>/recovery.json`. Any process running as your user could read that archive directly; the socket does not widen the blast radius. If you do not want plaintext available to other processes running as your user, do not run the daemon.
+- No authentication token is required. Same-user trust on the local machine is the only boundary. If we ever cross user boundaries (e.g., a system-wide LaunchDaemon) this needs to change.
+
 ## Data hygiene
 
 The repository's `.gitignore` excludes:
