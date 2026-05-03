@@ -164,6 +164,118 @@ public struct DefaultNotificationProbe: NotificationPermissionProbing {
   }
 }
 
+// MARK: - launchctl probing
+
+/// Result of asking launchd about a service via `launchctl print`.
+public enum LaunchctlPrintResult: Equatable, Sendable {
+  /// Service is unknown to launchd in the given domain (typically exit 113 /
+  /// "Could not find service…"). The LaunchAgent has not been bootstrapped.
+  case notFound
+  /// Service is known to launchd. `state` is the verbatim `state = …` line value
+  /// (e.g. "running", "not running", "waiting"). `pid` is set when the daemon
+  /// is actually executing; `lastExitCode` is set when launchctl reports it.
+  case loaded(state: String, pid: Int?, lastExitCode: Int?)
+  /// launchctl ran but failed for an unexpected reason (e.g. permissions).
+  case error(stderr: String, exitCode: Int32)
+}
+
+public protocol LaunchctlProbing {
+  func print(serviceTarget: String) -> LaunchctlPrintResult
+}
+
+/// Shells out to `/bin/launchctl print <serviceTarget>` and parses the
+/// human-readable output. The binary is in the system path on every macOS
+/// release; the output format is documented as stable for the keys we read
+/// (`state`, `pid`, `last exit code`).
+public struct DefaultLaunchctlProbe: LaunchctlProbing {
+  private let executablePath: String
+  private let timeout: TimeInterval
+
+  public init(executablePath: String = "/bin/launchctl", timeout: TimeInterval = 3.0) {
+    self.executablePath = executablePath
+    self.timeout = timeout
+  }
+
+  public func print(serviceTarget: String) -> LaunchctlPrintResult {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: executablePath)
+    process.arguments = ["print", serviceTarget]
+    let stdoutPipe = Pipe()
+    let stderrPipe = Pipe()
+    process.standardOutput = stdoutPipe
+    process.standardError = stderrPipe
+    do {
+      try process.run()
+    } catch {
+      return .error(stderr: "launchctl failed to launch: \(error.localizedDescription)", exitCode: -1)
+    }
+    let deadline = DispatchTime.now() + timeout
+    let timer = DispatchWorkItem { [weak process] in
+      if let proc = process, proc.isRunning { proc.terminate() }
+    }
+    DispatchQueue.global().asyncAfter(deadline: deadline, execute: timer)
+    process.waitUntilExit()
+    timer.cancel()
+    let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+    let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+    let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+    let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+    let exitCode = process.terminationStatus
+    return LaunchctlPrintParser.parse(exitCode: exitCode, stdout: stdout, stderr: stderr)
+  }
+}
+
+/// Internal parser broken out so tests can feed it captured launchctl output
+/// without spawning a real process.
+public enum LaunchctlPrintParser {
+  public static func parse(exitCode: Int32, stdout: String, stderr: String) -> LaunchctlPrintResult {
+    // launchctl returns 113 for "Could not find service" on modern macOS, but
+    // older releases use 3 or other small codes. The stderr text is the
+    // authoritative signal.
+    let combinedLowercase = (stdout + "\n" + stderr).lowercased()
+    if combinedLowercase.contains("could not find service") {
+      return .notFound
+    }
+    if exitCode != 0 && stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      return .error(stderr: stderr.trimmingCharacters(in: .whitespacesAndNewlines), exitCode: exitCode)
+    }
+    var state: String?
+    var pid: Int?
+    var lastExitCode: Int?
+    for rawLine in stdout.split(whereSeparator: { $0 == "\n" }) {
+      let line = rawLine.trimmingCharacters(in: .whitespaces)
+      if let value = matchKeyValue(line: line, key: "state") {
+        state = value
+      } else if let value = matchKeyValue(line: line, key: "pid"), let parsed = Int(value) {
+        pid = parsed
+      } else if let value = matchKeyValue(line: line, key: "last exit code"), let parsed = Int(value) {
+        lastExitCode = parsed
+      }
+    }
+    if let state {
+      return .loaded(state: state, pid: pid, lastExitCode: lastExitCode)
+    }
+    if exitCode != 0 {
+      return .error(stderr: stderr.trimmingCharacters(in: .whitespacesAndNewlines), exitCode: exitCode)
+    }
+    // Loaded but launchctl gave us nothing parseable — treat as loaded with
+    // unknown state so the UI can still report "Loaded" honestly.
+    return .loaded(state: "unknown", pid: nil, lastExitCode: nil)
+  }
+
+  /// Matches `key = value` lines. Whitespace around `=` is permitted; the value
+  /// is returned with no surrounding whitespace. Returns nil if the line does
+  /// not start with `key`.
+  private static func matchKeyValue(line: String, key: String) -> String? {
+    guard line.lowercased().hasPrefix(key) else { return nil }
+    let afterKey = line.dropFirst(key.count)
+    let trimmed = afterKey.drop(while: { $0 == " " || $0 == "\t" })
+    guard trimmed.first == "=" else { return nil }
+    let value = trimmed.dropFirst().drop(while: { $0 == " " || $0 == "\t" })
+    return String(value)
+  }
+}
+
 // MARK: - Checker
 
 public protocol HealthChecking {
@@ -175,9 +287,11 @@ public protocol HealthChecking {
 /// `~/Library/Messages`, the daemon socket, or `UNUserNotificationCenter`.
 public final class DefaultHealthChecker: HealthChecking {
   public let paths: HealthCheckPaths
+  public let launchctlServiceTarget: String
   private let daemon: DaemonControlClienting
   private let files: FileProbing
   private let notifications: NotificationPermissionProbing
+  private let launchctl: LaunchctlProbing
   private let configLoader: (URL) -> SettingsConfig?
 
   public init(
@@ -185,13 +299,22 @@ public final class DefaultHealthChecker: HealthChecking {
     daemon: DaemonControlClienting,
     files: FileProbing = DefaultFileProbe(),
     notifications: NotificationPermissionProbing = DefaultNotificationProbe(),
+    launchctl: LaunchctlProbing = DefaultLaunchctlProbe(),
+    launchctlServiceTarget: String = DefaultHealthChecker.defaultLaunchctlServiceTarget(),
     configLoader: @escaping (URL) -> SettingsConfig? = DefaultHealthChecker.defaultConfigLoader
   ) {
     self.paths = paths
     self.daemon = daemon
     self.files = files
     self.notifications = notifications
+    self.launchctl = launchctl
+    self.launchctlServiceTarget = launchctlServiceTarget
     self.configLoader = configLoader
+  }
+
+  /// `gui/<uid>/com.imu.watcher` — matches `scripts/install-daemon.sh`.
+  public static func defaultLaunchctlServiceTarget(uid: uid_t = getuid()) -> String {
+    "gui/\(uid)/com.imu.watcher"
   }
 
   /// Reads `~/.config/imessage-unsent/config.toml` if it exists; returns nil
@@ -213,10 +336,12 @@ public final class DefaultHealthChecker: HealthChecking {
     let configMissing = parsedConfig == nil
     let resolved = paths.overriding(dataDir: parsedConfig?.dataDir)
     let notifStatus = await notifications.authorizationStatus()
+    let launchctlResult = launchctl.print(serviceTarget: launchctlServiceTarget)
 
     var checks: [HealthCheck] = []
     checks.append(checkDaemonBinary(paths: resolved))
     checks.append(checkDaemonPlist(paths: resolved))
+    checks.append(checkLaunchctlLoaded(result: launchctlResult, paths: resolved))
     checks.append(checkRecoveryScripts(paths: resolved))
     checks.append(checkDaemonRunning(paths: resolved, pong: pong))
     checks.append(checkDaemonStatus(status: status, pong: pong))
@@ -302,13 +427,75 @@ public final class DefaultHealthChecker: HealthChecking {
     )
   }
 
+  private func checkLaunchctlLoaded(result: LaunchctlPrintResult, paths: HealthCheckPaths) -> HealthCheck {
+    let id = "daemon.launchctl"
+    let title = "LaunchAgent loaded"
+    let target = launchctlServiceTarget
+    switch result {
+    case .notFound:
+      return HealthCheck(
+        id: id,
+        category: .daemon,
+        order: 2,
+        severity: .fail,
+        title: title,
+        summary: "launchd does not know about `\(target)`",
+        detail: "The plist on disk has not been bootstrapped into the user's launchd domain, so the daemon will not start at login or when relaunched.",
+        remediation: "Run `make daemon-install` (recommended) or `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.imu.watcher.plist`.",
+        remediationURL: nil
+      )
+    case let .loaded(state, pid, lastExitCode):
+      let stateLower = state.lowercased()
+      let pidText = pid.map { " (pid \($0))" } ?? ""
+      let exitText = lastExitCode.map { " — last exit code \($0)" } ?? ""
+      if stateLower == "running" {
+        return HealthCheck(
+          id: id,
+          category: .daemon,
+          order: 2,
+          severity: .pass,
+          title: title,
+          summary: "launchd reports `\(state)`\(pidText)",
+          detail: "Service target: \(target)",
+          remediation: nil,
+          remediationURL: nil
+        )
+      }
+      let crashed = (lastExitCode ?? 0) != 0
+      return HealthCheck(
+        id: id,
+        category: .daemon,
+        order: 2,
+        severity: crashed ? .fail : .warn,
+        title: title,
+        summary: "launchd reports `\(state)`\(exitText)",
+        detail: "Service target: \(target). State `\(state)` typically means launchd has the job but the daemon process is not currently executing.",
+        remediation: "Try `launchctl kickstart -k \(target)`. If it keeps exiting, check \(paths.logFile.path).",
+        remediationURL: files.exists(paths.logFile) ? paths.logFile : nil
+      )
+    case let .error(stderr, exitCode):
+      let truncated = stderr.count > 240 ? String(stderr.prefix(240)) + "…" : stderr
+      return HealthCheck(
+        id: id,
+        category: .daemon,
+        order: 2,
+        severity: .warn,
+        title: title,
+        summary: "Could not query launchctl (exit \(exitCode))",
+        detail: truncated.isEmpty ? "Service target: \(target)." : "Service target: \(target).\nlaunchctl stderr: \(truncated)",
+        remediation: "Run `launchctl print \(target)` in a terminal to see the full output.",
+        remediationURL: nil
+      )
+    }
+  }
+
   private func checkRecoveryScripts(paths: HealthCheckPaths) -> HealthCheck {
     let url = paths.recoveryScript
     if files.exists(url) {
       return HealthCheck(
         id: "daemon.scripts",
         category: .daemon,
-        order: 2,
+        order: 3,
         severity: .pass,
         title: "Recovery scripts",
         summary: "Installed at \(displayPath(url.deletingLastPathComponent(), home: paths.home))",
@@ -320,7 +507,7 @@ public final class DefaultHealthChecker: HealthChecking {
     return HealthCheck(
       id: "daemon.scripts",
       category: .daemon,
-      order: 2,
+      order: 3,
       severity: .warn,
       title: "Recovery scripts",
       summary: "`recover.sh` not found — daemon cannot run recoveries",
@@ -335,7 +522,7 @@ public final class DefaultHealthChecker: HealthChecking {
       return HealthCheck(
         id: "daemon.running",
         category: .daemon,
-        order: 3,
+        order: 4,
         severity: .pass,
         title: "Daemon running",
         summary: "Control socket responded to ping",
@@ -348,7 +535,7 @@ public final class DefaultHealthChecker: HealthChecking {
     return HealthCheck(
       id: "daemon.running",
       category: .daemon,
-      order: 3,
+      order: 4,
       severity: .fail,
       title: "Daemon running",
       summary: "Control socket did not respond",
@@ -363,7 +550,7 @@ public final class DefaultHealthChecker: HealthChecking {
       return HealthCheck(
         id: "daemon.status",
         category: .daemon,
-        order: 4,
+        order: 5,
         severity: pong ? .warn : .info,
         title: "Daemon status",
         summary: pong ? "Ping ok but status query failed" : "Not available — daemon is down",
@@ -401,7 +588,7 @@ public final class DefaultHealthChecker: HealthChecking {
     return HealthCheck(
       id: "daemon.status",
       category: .daemon,
-      order: 4,
+      order: 5,
       severity: severity,
       title: "Daemon status",
       summary: summary,

@@ -13,6 +13,7 @@ final class DefaultHealthCheckerTests: XCTestCase {
 
     XCTAssertEqual(byID["daemon.binary"]?.severity, .pass)
     XCTAssertEqual(byID["daemon.plist"]?.severity, .pass)
+    XCTAssertEqual(byID["daemon.launchctl"]?.severity, .pass)
     XCTAssertEqual(byID["daemon.scripts"]?.severity, .pass)
     XCTAssertEqual(byID["daemon.running"]?.severity, .pass)
     XCTAssertEqual(byID["daemon.status"]?.severity, .pass)
@@ -23,6 +24,9 @@ final class DefaultHealthCheckerTests: XCTestCase {
     XCTAssertEqual(byID["config.file"]?.severity, .pass)
     XCTAssertEqual(byID["notifications"]?.severity, .pass)
     XCTAssertEqual(byID["daemon.log"]?.severity, .info)
+
+    XCTAssertEqual(env.launchctl.lastQueriedTarget, "gui/501/com.imu.watcher",
+                   "checker must thread the launchctl service target through to the probe")
   }
 
   // MARK: Specific failure modes
@@ -209,6 +213,77 @@ final class DefaultHealthCheckerTests: XCTestCase {
 
     XCTAssertEqual(row.severity, .warn)
   }
+
+  // MARK: launchctl probe
+
+  func testLaunchctlNotFound_isFail_withBootstrapRemediation() async {
+    let env = TestEnvironment.allHealthy()
+    env.launchctl.cannedResult = .notFound
+
+    let checks = await env.checker.runAll()
+    let row = try! XCTUnwrap(checks.first { $0.id == "daemon.launchctl" })
+
+    XCTAssertEqual(row.severity, .fail)
+    XCTAssertTrue(row.remediation?.contains("launchctl bootstrap") ?? false,
+                  "remediation should point at launchctl bootstrap, got: \(String(describing: row.remediation))")
+    XCTAssertTrue(row.remediation?.contains("make daemon-install") ?? false)
+  }
+
+  func testLaunchctlLoadedAndRunning_isPass_withPidInSummary() async {
+    let env = TestEnvironment.allHealthy()
+    env.launchctl.cannedResult = .loaded(state: "running", pid: 8421, lastExitCode: 0)
+
+    let checks = await env.checker.runAll()
+    let row = try! XCTUnwrap(checks.first { $0.id == "daemon.launchctl" })
+
+    XCTAssertEqual(row.severity, .pass)
+    XCTAssertTrue(row.summary.contains("8421"), "pid should appear in summary, got: \(row.summary)")
+  }
+
+  func testLaunchctlLoadedButCrashed_isFail_withKickstartRemediation() async {
+    let env = TestEnvironment.allHealthy()
+    env.launchctl.cannedResult = .loaded(state: "not running", pid: nil, lastExitCode: 1)
+
+    let checks = await env.checker.runAll()
+    let row = try! XCTUnwrap(checks.first { $0.id == "daemon.launchctl" })
+
+    XCTAssertEqual(row.severity, .fail,
+                   "non-zero last exit code should be fail, not warn — the daemon crashed")
+    XCTAssertTrue(row.summary.contains("last exit code 1"),
+                  "summary should surface the exit code, got: \(row.summary)")
+    XCTAssertTrue(row.remediation?.contains("launchctl kickstart") ?? false)
+  }
+
+  func testLaunchctlLoadedButWaiting_isWarn_whenExitCodeZero() async {
+    let env = TestEnvironment.allHealthy()
+    env.launchctl.cannedResult = .loaded(state: "waiting", pid: nil, lastExitCode: nil)
+
+    let checks = await env.checker.runAll()
+    let row = try! XCTUnwrap(checks.first { $0.id == "daemon.launchctl" })
+
+    XCTAssertEqual(row.severity, .warn,
+                   "waiting with no error history is a transient state, not a hard failure")
+  }
+
+  func testLaunchctlError_isWarn_withTruncatedStderrInDetail() async {
+    let env = TestEnvironment.allHealthy()
+    let longStderr = String(repeating: "x", count: 500)
+    env.launchctl.cannedResult = .error(stderr: longStderr, exitCode: 99)
+
+    let checks = await env.checker.runAll()
+    let row = try! XCTUnwrap(checks.first { $0.id == "daemon.launchctl" })
+
+    XCTAssertEqual(row.severity, .warn)
+    XCTAssertTrue(row.summary.contains("99"), "exit code should appear in summary")
+    XCTAssertTrue((row.detail ?? "").contains("…"), "long stderr should be truncated with an ellipsis")
+  }
+
+  func testLaunchctlServiceTargetIncludesUid() {
+    // Spot-check the default helper so a future refactor doesn't silently drop
+    // the uid component of the launchctl service target.
+    let target = DefaultHealthChecker.defaultLaunchctlServiceTarget(uid: 501)
+    XCTAssertEqual(target, "gui/501/com.imu.watcher")
+  }
 }
 
 // MARK: - Test helpers
@@ -223,6 +298,7 @@ private final class TestEnvironment {
   let files: StubFileProbing
   let daemon: StubDaemonControlClient
   let notifications: StubNotificationProbe
+  let launchctl: StubLaunchctlProbe
   private let configHolder: ConfigHolder
   let checker: DefaultHealthChecker
 
@@ -236,12 +312,14 @@ private final class TestEnvironment {
     files: StubFileProbing,
     daemon: StubDaemonControlClient,
     notifications: StubNotificationProbe,
+    launchctl: StubLaunchctlProbe,
     initialConfig: SettingsConfig?
   ) {
     self.paths = paths
     self.files = files
     self.daemon = daemon
     self.notifications = notifications
+    self.launchctl = launchctl
     let holder = ConfigHolder(initialConfig)
     self.configHolder = holder
     self.checker = DefaultHealthChecker(
@@ -249,6 +327,8 @@ private final class TestEnvironment {
       daemon: daemon,
       files: files,
       notifications: notifications,
+      launchctl: launchctl,
+      launchctlServiceTarget: "gui/501/com.imu.watcher",
       configLoader: { _ in holder.value }
     )
   }
@@ -298,11 +378,15 @@ private final class TestEnvironment {
     let notifications = StubNotificationProbe()
     notifications.cannedStatus = .authorized
 
+    let launchctl = StubLaunchctlProbe()
+    launchctl.cannedResult = .loaded(state: "running", pid: 12_345, lastExitCode: 0)
+
     return TestEnvironment(
       paths: paths,
       files: files,
       daemon: daemon,
       notifications: notifications,
+      launchctl: launchctl,
       initialConfig: SettingsConfig()
     )
   }
@@ -359,5 +443,15 @@ final class StubNotificationProbe: NotificationPermissionProbing {
 
   func authorizationStatus() async -> UNAuthorizationStatus {
     cannedStatus
+  }
+}
+
+final class StubLaunchctlProbe: LaunchctlProbing {
+  var cannedResult: LaunchctlPrintResult = .loaded(state: "running", pid: 1, lastExitCode: 0)
+  private(set) var lastQueriedTarget: String?
+
+  func print(serviceTarget: String) -> LaunchctlPrintResult {
+    lastQueriedTarget = serviceTarget
+    return cannedResult
   }
 }
