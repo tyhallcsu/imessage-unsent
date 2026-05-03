@@ -1,10 +1,12 @@
 import AppKit
 import IMUMenuBarCore
 import SwiftUI
+import UserNotifications
 
 struct SettingsWindow: View {
   @ObservedObject var model: MenuBarModel
   @ObservedObject var settingsModel: SettingsModel
+  @ObservedObject var permissionModel: NotificationPermissionModel
   @ObservedObject var restartModel: DaemonRestartModel
 
   var body: some View {
@@ -19,6 +21,9 @@ struct SettingsWindow: View {
     .frame(minWidth: 520, minHeight: 540)
     .onAppear {
       model.refresh()
+    }
+    .task {
+      await permissionModel.refresh()
     }
     .toolbar {
       ToolbarItemGroup(placement: .confirmationAction) {
@@ -95,6 +100,8 @@ struct SettingsWindow: View {
 
   private var notificationsSection: some View {
     Section("Notifications") {
+      permissionRow
+
       Toggle("Show macOS notifications", isOn: $settingsModel.draft.notifications.show)
 
       VStack(alignment: .leading, spacing: 4) {
@@ -190,6 +197,34 @@ struct SettingsWindow: View {
         Label("Restore mode is enabled in config — currently has no effect (see issue #16).", systemImage: "exclamationmark.shield")
           .foregroundStyle(.orange)
           .font(.caption)
+      }
+    }
+  }
+
+  // MARK: Notification permission
+
+  @ViewBuilder
+  private var permissionRow: some View {
+    HStack {
+      Text("macOS notification permission")
+      Spacer()
+      Text(permissionModel.statusText)
+        .foregroundStyle(.secondary)
+        .monospacedDigit()
+      switch permissionModel.status {
+      case .notDetermined:
+        Button("Enable notifications") {
+          Task { await permissionModel.enable() }
+        }
+      case .denied:
+        Button("Open System Settings") {
+          NSWorkspace.shared.open(NotificationPermissionModel.systemSettingsURL)
+        }
+      case .authorized, .provisional:
+        Image(systemName: "checkmark.circle.fill")
+          .foregroundStyle(.green)
+      default:
+        EmptyView()
       }
     }
   }
