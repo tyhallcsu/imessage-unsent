@@ -230,16 +230,16 @@ private struct RecoveryRun {
   let manifest: ArchiveRecovery
 }
 
-private struct ArchiveManifest: Codable {
-  let detectedAt: String
-  let rowid: Int64
-  let guid: String
-  let handle: String
-  let editedAt: Int64
-  let snapshotStartedAt: String
-  let snapshotFinishedAt: String
-  let snapFiles: [String: ArchiveSnapFile]
-  var recovery: ArchiveRecovery?
+public struct ArchiveManifest: Codable, Equatable {
+  public let detectedAt: String
+  public let rowid: Int64
+  public let guid: String
+  public let handle: String
+  public let editedAt: Int64
+  public let snapshotStartedAt: String
+  public let snapshotFinishedAt: String
+  public let snapFiles: [String: ArchiveSnapFile]
+  public var recovery: ArchiveRecovery?
 
   enum CodingKeys: String, CodingKey {
     case detectedAt = "detected_at"
@@ -252,14 +252,36 @@ private struct ArchiveManifest: Codable {
     case snapFiles = "snap_files"
     case recovery
   }
+
+  public init(
+    detectedAt: String,
+    rowid: Int64,
+    guid: String,
+    handle: String,
+    editedAt: Int64,
+    snapshotStartedAt: String,
+    snapshotFinishedAt: String,
+    snapFiles: [String: ArchiveSnapFile],
+    recovery: ArchiveRecovery?
+  ) {
+    self.detectedAt = detectedAt
+    self.rowid = rowid
+    self.guid = guid
+    self.handle = handle
+    self.editedAt = editedAt
+    self.snapshotStartedAt = snapshotStartedAt
+    self.snapshotFinishedAt = snapshotFinishedAt
+    self.snapFiles = snapFiles
+    self.recovery = recovery
+  }
 }
 
-private struct ArchiveSnapFile: Codable {
-  let present: Bool
-  let size: Int64?
-  let mtime: String?
-  let sourceMtime: String?
-  let archiveMtime: String?
+public struct ArchiveSnapFile: Codable, Equatable {
+  public let present: Bool
+  public let size: Int64?
+  public let mtime: String?
+  public let sourceMtime: String?
+  public let archiveMtime: String?
 
   enum CodingKeys: String, CodingKey {
     case present
@@ -268,14 +290,28 @@ private struct ArchiveSnapFile: Codable {
     case sourceMtime = "source_mtime"
     case archiveMtime = "archive_mtime"
   }
+
+  public init(
+    present: Bool,
+    size: Int64?,
+    mtime: String?,
+    sourceMtime: String?,
+    archiveMtime: String?
+  ) {
+    self.present = present
+    self.size = size
+    self.mtime = mtime
+    self.sourceMtime = sourceMtime
+    self.archiveMtime = archiveMtime
+  }
 }
 
-private struct ArchiveRecovery: Codable {
-  let startedAt: String
-  let finishedAt: String
-  let exitCode: Int?
-  let recovered: Bool
-  let error: String?
+public struct ArchiveRecovery: Codable, Equatable {
+  public let startedAt: String
+  public let finishedAt: String
+  public let exitCode: Int?
+  public let recovered: Bool
+  public let error: String?
 
   enum CodingKeys: String, CodingKey {
     case startedAt = "started_at"
@@ -283,6 +319,20 @@ private struct ArchiveRecovery: Codable {
     case exitCode = "exit_code"
     case recovered
     case error
+  }
+
+  public init(
+    startedAt: String,
+    finishedAt: String,
+    exitCode: Int?,
+    recovered: Bool,
+    error: String?
+  ) {
+    self.startedAt = startedAt
+    self.finishedAt = finishedAt
+    self.exitCode = exitCode
+    self.recovered = recovered
+    self.error = error
   }
 }
 
