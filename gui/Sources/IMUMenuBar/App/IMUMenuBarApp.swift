@@ -8,6 +8,12 @@ struct IMUMenuBarApp: App {
   @NSApplicationDelegateAdaptor(IMUAppDelegate.self) private var appDelegate
   @StateObject private var model = MenuBarModel()
   @StateObject private var settingsModel = SettingsModel()
+  @StateObject private var restartModel = DaemonRestartModel(
+    restarter: DefaultDaemonRestarter(
+      pinger: DaemonControlClient(),
+      statusFetcher: { DaemonControlClient().status() }
+    )
+  )
   @Environment(\.openWindow) private var openWindow
 
   var body: some Scene {
@@ -30,7 +36,7 @@ struct IMUMenuBarApp: App {
     .handlesExternalEvents(matching: ["history"])
 
     Window("imessage-unsent Settings", id: "settings") {
-      SettingsWindow(model: model, settingsModel: settingsModel)
+      SettingsWindow(model: model, settingsModel: settingsModel, restartModel: restartModel)
     }
     .handlesExternalEvents(matching: ["settings"])
 
