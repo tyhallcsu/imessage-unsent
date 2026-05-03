@@ -542,9 +542,11 @@ Verified on macOS 15 (Sequoia, Darwin 24.x). The retraction feature itself shipp
 
 ## Privacy and legal
 
-This tool is intended for **your own device** and **your own messages**. Unauthorized access to another person's `chat.db` may violate the [Computer Fraud and Abuse Act](https://www.law.cornell.edu/uscode/text/18/1030), the [Electronic Communications Privacy Act](https://www.law.cornell.edu/uscode/text/18/2511), state wiretap laws, and equivalent statutes elsewhere. See [SECURITY.md](SECURITY.md) for the full scope statement.
+This tool is intended for **your own device** and **your own messages**. Unauthorized access to another person's `chat.db` may violate the [Computer Fraud and Abuse Act](https://www.law.cornell.edu/uscode/text/18/1030), the [Electronic Communications Privacy Act](https://www.law.cornell.edu/uscode/text/18/2511), state wiretap laws, and equivalent statutes elsewhere.
 
-The recovered text itself may also be subject to legal protections (e.g., if it constitutes content of an electronic communication where you were not the intended recipient). Use judgment.
+For the operator-facing framework — intended scope, off-limits uses, statute-by-statute notes (CFAA, ECPA, California § 502 / § 632, Apple's iCloud ToS, GDPR / UK DPA 2018), and the language the GUI's first-run consent dialog must surface — see [`docs/legal-and-ethics.md`](docs/legal-and-ethics.md). [SECURITY.md](SECURITY.md) covers the operating-mode invariants and the daemon's threat model.
+
+The recovered text itself may also be subject to legal protections (e.g., if it constitutes content of an electronic communication where you were not the intended recipient). **Use judgment, and consult a lawyer in your jurisdiction if your situation is non-routine.**
 
 ## License
 
