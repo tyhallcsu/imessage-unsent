@@ -190,7 +190,7 @@ struct SettingsWindow: View {
   }
 
   private var restartHint: String {
-    "launchctl kickstart -k gui/$(id -u)/com.imessage-unsent.daemon"
+    "launchctl kickstart -k gui/$(id -u)/com.imu.watcher"
   }
 
   // MARK: Buttons

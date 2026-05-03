@@ -36,6 +36,9 @@ struct MenuBarContentView: View {
       Button("Open History") {
         openAppURL("imu://history")
       }
+      Button("Health Check…") {
+        openAppURL("imu://doctor")
+      }
       Button("Open Settings") {
         openAppURL("imu://settings")
       }
