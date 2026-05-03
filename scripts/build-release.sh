@@ -16,9 +16,11 @@
 #   IMUMenuBar-<version>.zip               + .sha256
 #     └── IMUMenuBar.app/                 (release-mode menu bar app bundle)
 #
-# Code-signing and notarization are NOT performed by this script — that lives
-# in scripts/sign-release.sh (issue #20). Artifacts produced here are
-# always unsigned; the release workflow surfaces this in the release body.
+# Code-signing and notarization are delegated to scripts/sign-release.sh
+# (issue #20). That script is credential-driven: when Developer ID env vars
+# are present it signs both binaries (and notarizes the .app); when they're
+# absent it skips with a clear log so unsigned builds still produce
+# downloadable artifacts.
 #
 # This script is platform-neutral about the build steps but only runs on
 # macOS (it produces a .app bundle).
@@ -82,10 +84,6 @@ chmod 0755 "$DAEMON_STAGE/install.sh"
 [[ -f "$ROOT_DIR/LICENSE" ]] && cp "$ROOT_DIR/LICENSE" "$DAEMON_STAGE/LICENSE"
 [[ -f "$ROOT_DIR/README.md" ]] && cp "$ROOT_DIR/README.md" "$DAEMON_STAGE/README.md"
 
-log "Packaging daemon -> $DAEMON_TARBALL_NAME"
-tar -C "$STAGE_DIR" -czf "$OUTPUT_DIR_ABS/$DAEMON_TARBALL_NAME" "imu-watcher-${VERSION}"
-( cd "$OUTPUT_DIR_ABS" && shasum -a 256 "$DAEMON_TARBALL_NAME" > "${DAEMON_TARBALL_NAME}.sha256" )
-
 # --- GUI .app bundle -------------------------------------------------------
 
 log "Building GUI menu bar app (swift build -c release)"
@@ -108,6 +106,17 @@ cp "$ROOT_DIR/gui/Info.plist" "$APP_CONTENTS/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${VERSION#v}" "$APP_CONTENTS/Info.plist" 2>/dev/null \
   || /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VERSION#v}" "$APP_CONTENTS/Info.plist"
 
+# --- Sign + notarize (credential-driven, skipped without secrets) ----------
+
+log "Sign + notarize step"
+bash "$ROOT_DIR/scripts/sign-release.sh" "$APP_STAGE" "$DAEMON_STAGE/imu-watcher"
+
+# --- Package -------------------------------------------------------------
+
+log "Packaging daemon -> $DAEMON_TARBALL_NAME"
+tar -C "$STAGE_DIR" -czf "$OUTPUT_DIR_ABS/$DAEMON_TARBALL_NAME" "imu-watcher-${VERSION}"
+( cd "$OUTPUT_DIR_ABS" && shasum -a 256 "$DAEMON_TARBALL_NAME" > "${DAEMON_TARBALL_NAME}.sha256" )
+
 log "Packaging GUI -> $GUI_ZIP_NAME"
 ( cd "$STAGE_DIR" && /usr/bin/zip -qry "$OUTPUT_DIR_ABS/$GUI_ZIP_NAME" "IMUMenuBar.app" )
 ( cd "$OUTPUT_DIR_ABS" && shasum -a 256 "$GUI_ZIP_NAME" > "${GUI_ZIP_NAME}.sha256" )
@@ -116,4 +125,6 @@ log "Packaging GUI -> $GUI_ZIP_NAME"
 
 log "Done. Artifacts in $OUTPUT_DIR_ABS:"
 ( cd "$OUTPUT_DIR_ABS" && ls -lh "$DAEMON_TARBALL_NAME" "${DAEMON_TARBALL_NAME}.sha256" "$GUI_ZIP_NAME" "${GUI_ZIP_NAME}.sha256" )
-log "Note: artifacts are UNSIGNED. Wire scripts/sign-release.sh (issue #20) once Developer ID secrets are provisioned."
+if [[ -z "${APPLE_DEVELOPER_ID_NAME:-}" ]]; then
+  log "Note: artifacts are UNSIGNED (no Developer ID env vars). See docs/code-signing.md."
+fi
