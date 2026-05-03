@@ -150,6 +150,13 @@ public struct DefaultFileProbe: FileProbing {
 
 public protocol NotificationPermissionProbing {
   func authorizationStatus() async -> UNAuthorizationStatus
+  func requestAuthorization(options: UNAuthorizationOptions) async -> Bool
+}
+
+public extension NotificationPermissionProbing {
+  // Default no-op so existing test stubs that only implement the query side
+  // keep compiling. The real probe overrides this.
+  func requestAuthorization(options: UNAuthorizationOptions) async -> Bool { false }
 }
 
 public struct DefaultNotificationProbe: NotificationPermissionProbing {
@@ -159,6 +166,14 @@ public struct DefaultNotificationProbe: NotificationPermissionProbing {
     await withCheckedContinuation { continuation in
       UNUserNotificationCenter.current().getNotificationSettings { settings in
         continuation.resume(returning: settings.authorizationStatus)
+      }
+    }
+  }
+
+  public func requestAuthorization(options: UNAuthorizationOptions) async -> Bool {
+    await withCheckedContinuation { continuation in
+      UNUserNotificationCenter.current().requestAuthorization(options: options) { granted, _ in
+        continuation.resume(returning: granted)
       }
     }
   }
