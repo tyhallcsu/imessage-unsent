@@ -6,7 +6,8 @@ SHELL_SOURCES := scripts/*.sh scripts/lib/*.sh tests/fixtures/*.sh tests/bats/he
 
 .PHONY: fixture fixture-check shellcheck python-check bats python-test test \
 	daemon-build daemon-test daemon-install daemon-uninstall \
-	gui-build gui-test gui-run swift-test
+	gui-build gui-test gui-run swift-test \
+	release release-notes
 
 fixture:
 	./tests/fixtures/build-fixture.sh
@@ -55,3 +56,20 @@ gui-run:
 	bash script/build_and_run.sh run
 
 swift-test: daemon-test gui-test
+
+# Build distributable release artifacts (daemon tarball + GUI .app zip + sha256s).
+# Usage: make release VERSION=v0.4.0
+# Output goes under ./dist/.
+release:
+ifndef VERSION
+	$(error VERSION is required, e.g. make release VERSION=v0.4.0)
+endif
+	bash scripts/build-release.sh $(VERSION) dist
+
+# Generate Markdown release notes from conventional commits since the previous
+# tag, to stdout. Usage: make release-notes VERSION=v0.4.0
+release-notes:
+ifndef VERSION
+	$(error VERSION is required, e.g. make release-notes VERSION=v0.4.0)
+endif
+	@bash scripts/release-notes.sh $(VERSION)

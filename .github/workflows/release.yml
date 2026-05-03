@@ -4,13 +4,14 @@ on:
   push:
     tags:
       - "v*.*.*"
+      - "v*.*.*-*"
 
 permissions:
   contents: write
 
 jobs:
   release:
-    name: Build artifacts and publish release
+    name: Build, test, and publish release artifacts
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,45 +21,73 @@ jobs:
       - name: Verify tag format
         run: |
           tag="${GITHUB_REF#refs/tags/}"
-          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Tag $tag is not semver (vMAJOR.MINOR.PATCH)"; exit 1
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::Tag $tag is not semver (vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-prerelease)"; exit 1
           fi
           echo "TAG=$tag" >> "$GITHUB_ENV"
+          if [[ "$tag" == *-* ]]; then
+            echo "PRERELEASE=true" >> "$GITHUB_ENV"
+          else
+            echo "PRERELEASE=false" >> "$GITHUB_ENV"
+          fi
 
-      - name: Build source tarball
+      - name: Cache daemon .build
+        uses: actions/cache@v4
+        with:
+          path: daemon/.build
+          key: swift-daemon-release-${{ runner.os }}-${{ hashFiles('daemon/Package.swift', 'daemon/Sources/**/*.swift') }}
+          restore-keys: |
+            swift-daemon-release-${{ runner.os }}-
+
+      - name: Cache gui .build
+        uses: actions/cache@v4
+        with:
+          path: gui/.build
+          key: swift-gui-release-${{ runner.os }}-${{ hashFiles('gui/Package.swift', 'gui/Sources/**/*.swift') }}
+          restore-keys: |
+            swift-gui-release-${{ runner.os }}-
+
+      - name: Run swift tests (gate the release)
         run: |
-          mkdir -p dist
-          tar --exclude='.git' --exclude='dist' --exclude='imessage-recovery' \
-              -czf "dist/imessage-unsent-${TAG}.tar.gz" .
-          shasum -a 256 "dist/imessage-unsent-${TAG}.tar.gz" \
-            > "dist/imessage-unsent-${TAG}.tar.gz.sha256"
+          swift test --package-path daemon
+          swift test --package-path gui
+
+      - name: Build release artifacts
+        run: |
+          bash scripts/build-release.sh "$TAG" dist
 
       - name: Generate release notes
-        id: notes
         run: |
-          prev_tag=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
-          if [ -n "$prev_tag" ]; then
-            range="${prev_tag}..${TAG}"
-          else
-            range="${TAG}"
-          fi
-          {
-            echo "## What changed"
-            echo
-            git log --pretty='- %s (%h)' "$range" | head -50
-            echo
-            echo "## Artifacts"
-            echo
-            echo "- \`imessage-unsent-${TAG}.tar.gz\` — source bundle"
-            echo "- \`imessage-unsent-${TAG}.tar.gz.sha256\` — checksum"
-          } > release-notes.md
+          bash scripts/release-notes.sh "$TAG" \
+            | sed "s/VERSION/${TAG}/g" \
+            > release-notes.md
+          echo "--- release notes preview ---"
+          cat release-notes.md
+
+      - name: Build source tarball (preserved for downstream packagers)
+        run: |
+          tar --exclude='.git' --exclude='dist' --exclude='imessage-recovery' \
+              --exclude='**/.build' \
+              -czf "dist/imessage-unsent-${TAG}-source.tar.gz" .
+          ( cd dist && shasum -a 256 "imessage-unsent-${TAG}-source.tar.gz" \
+              > "imessage-unsent-${TAG}-source.tar.gz.sha256" )
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          prerelease_flag=""
+          if [[ "$PRERELEASE" == "true" ]]; then
+            prerelease_flag="--prerelease"
+          fi
+          # shellcheck disable=SC2086
           gh release create "$TAG" \
             --title "$TAG" \
             --notes-file release-notes.md \
-            dist/imessage-unsent-${TAG}.tar.gz \
-            dist/imessage-unsent-${TAG}.tar.gz.sha256
+            --draft \
+            $prerelease_flag \
+            dist/*.tar.gz \
+            dist/*.tar.gz.sha256 \
+            dist/*.zip \
+            dist/*.zip.sha256
+          echo "::notice::Draft release $TAG created. Review and publish from the GitHub Releases UI."
