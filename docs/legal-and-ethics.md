@@ -44,7 +44,7 @@ Three different technical actions get conflated in casual conversation. The lega
 |---|---|---|
 | **Passive read of `chat.db` on your own device** | ✅ Yes (Notify-only / Recover mode, default and only shipped behaviour). Opens with `SQLITE_OPEN_READONLY`, copies WAL frames into an isolated working directory, never writes back. | This is reading data Apple wrote to your own filesystem. The data is yours to read on your machine in the same way any other file in `~/Library` is. |
 | **Mutation of `chat.db`** (writing recovered text back into the live row) | 🚧 Gated. Tracked by [#16](https://github.com/tyhallcsu/imessage-unsent/issues/16); requires both `experimental.restore_mode = true` in config **and** a per-invocation consent dialog (yet to ship). | A different posture: you are now causing changes on your own device that may iCloud-sync to other devices including the sender's. See README's [Modes — Recover vs Restore](../README.md#modes--recover-vs-restore) section for why the project ships Notify-only as the default. |
-| **Interception of messages in transit** | ❌ **Not possible** with this tool. APNs (Apple Push Notification service) payloads are end-to-end encrypted between sender and recipient devices. This tool reads the *result* after delivery, not the channel. | Tools that intercept messages in transit fall under the federal Wiretap Act and many state equivalents. This is the bright line the project will not cross. |
+| **Interception of messages in transit** | ❌ **Not possible** with this tool. iMessage payloads delivered over APNs (Apple Push Notification service) are end-to-end encrypted between the sender's and recipient's devices. This tool reads the *result* after delivery, not the channel. | Tools that intercept messages in transit fall under the federal Wiretap Act and many state equivalents. This is the bright line the project will not cross. |
 
 Treat anything in the second column as the entire scope of what the published code does. Anything in the third column is excluded by design.
 
@@ -56,7 +56,7 @@ The following are the statutes operators most often ask about. None of these sum
 
 Prohibits "unauthorized access" or "exceeding authorized access" to a "protected computer" (which courts have read to include nearly any internet-connected device). The element courts return to repeatedly is **authorization**.
 
-- Reading data on a Mac you own, signed in with your own Apple ID, where Apple has delivered messages to your local `chat.db` for you to consume in the Messages app, is hard to characterize as unauthorized access to anything.
+- Reading data on a Mac you own, signed in with your own Apple ID, where Apple has delivered messages to your local `chat.db` for you to consume in the Messages app, is the strongest position available under § 1030's authorization element.
 - Reading `chat.db` on a Mac you do **not** own — even if the device is unattended, even if you can physically reach the keyboard — is the kind of fact pattern that has been prosecuted as a CFAA violation.
 
 The post-*Van Buren* (2021) consensus narrowed CFAA's "exceeds authorized access" prong, but it did not narrow "unauthorized access" itself. If your access starts unauthorized, CFAA still applies.
@@ -65,7 +65,7 @@ The post-*Van Buren* (2021) consensus narrowed CFAA's "exceeds authorized access
 
 Two prongs matter:
 
-- **§ 2511 (Wiretap)** prohibits the **interception of electronic communications in transit**. Because this tool only ever reads `chat.db` *after* a message has been delivered to the recipient device, it is functionally a stored-communications operation, not an interception. Most courts have held that reading a stored message on the recipient's own device, by the recipient, is not interception.
+- **§ 2511 (Wiretap)** prohibits the **interception of electronic communications in transit**. Because this tool only ever reads `chat.db` *after* a message has been delivered to the recipient device, it is functionally a stored-communications operation, not an interception. Courts have generally analyzed reading a stored message on the recipient's own device, by the recipient, as a stored-communications question rather than an interception.
 - **§ 2701 (Stored Communications Act)** prohibits unauthorized access to stored electronic communications held in "electronic storage" by a "remote computing service." Local files on your own laptop are generally not what § 2701 is aimed at, but the analysis becomes more delicate the moment a third party's device or a cloud service is involved.
 
 The "intended recipient" question is load-bearing for both prongs. If you are the intended recipient of a message and you read your own copy of it on your own device, the wiretap risk is low. If you are not the intended recipient — you are reading someone else's `chat.db` — the calculation changes.
@@ -74,7 +74,7 @@ The "intended recipient" question is load-bearing for both prongs. If you are th
 
 State laws frequently mirror or expand on the federal statutes, sometimes substantially. A non-exhaustive sample:
 
-- **California**: [Penal Code § 502](https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=PEN&sectionNum=502) (computer access — broader than CFAA in places). [Penal Code § 632](https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=PEN&sectionNum=632) (two-party consent for confidential communications).
+- **California**: [Penal Code § 502](https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=PEN&sectionNum=502) (computer access — broader than CFAA in places). [Penal Code § 632](https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=PEN&sectionNum=632) (two-party consent for confidential communications). § 632's reach into post-delivery *storage* of communications is fact-specific; the canonical risk surface is at the moment of recording or interception, not at later passive reads of already-stored data on the recipient's own device.
 - **Other two-party-consent states** (e.g., Florida, Illinois, Maryland, Massachusetts, Pennsylvania, Washington) have similar communication-privacy frameworks. These typically apply to interception in transit, but the broader privacy-tort posture in these jurisdictions can affect how a recovered-message disclosure is later used.
 - Many states have their own computer-misuse statutes that operate alongside § 1030.
 
@@ -84,7 +84,7 @@ If your jurisdiction is in this set and the situation is non-routine — for exa
 
 Running `imessage-unsent` does not require an Apple account separate from the one you already use to receive Messages, and it does not call any Apple-operated cloud API. It reads the local SQLite files Apple's own software writes to your device. That said:
 
-- **iCloud Messages sync** is the relevant Apple feature when considering Restore mode (§ 3 above). Writing to your local `chat.db` while iCloud Messages is enabled may resync the row to other devices on the account, including in some cases the sender's. The published Notify-only mode never writes, so this is forward-looking caution about Restore mode.
+- **iCloud Messages sync** is the relevant Apple feature when considering Restore mode (§ 3 above). Writing to your local `chat.db` while iCloud Messages is enabled may resync the modified row outward; the exact propagation is mode-dependent and not fully documented by Apple, which is itself a reason to treat any future Restore-mode write as a potential change to other people's local data. The published Notify-only mode never writes, so this is forward-looking caution about Restore mode.
 - The iCloud Terms of Service govern your relationship with Apple as a service provider. Apple has no general prohibition on reading data on your own device; Apple's terms primarily restrict abuse of Apple-operated services. But Apple's terms are updated periodically and you are responsible for the version in force when you run the tool. The current terms are linked from System Settings → Apple ID → Media & Purchases → Terms and Conditions.
 
 ## 6. EU / UK scope notes (GDPR, UK DPA 2018)
