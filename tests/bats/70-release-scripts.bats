@@ -179,3 +179,74 @@ load helpers
   [[ "$output" == *"APPLE_DEVELOPER_ID_CERT_PASSWORD"* ]]
   [[ "$output" == *"APPLE_TEAM_ID"* ]]
 }
+
+@test "sign-release.sh writes SIGNING_STATUS=unsigned in the skip path" {
+  local app="$BATS_TEST_TMPDIR/IMUMenuBar.app"; mkdir -p "$app/Contents/MacOS"
+  local daemon="$BATS_TEST_TMPDIR/imu-watcher"; : > "$daemon"; chmod +x "$daemon"
+  local out="$BATS_TEST_TMPDIR/dist"; mkdir -p "$out"
+
+  run bash -c "
+    unset APPLE_DEVELOPER_ID_CERT_BASE64 APPLE_DEVELOPER_ID_CERT_PASSWORD APPLE_DEVELOPER_ID_NAME APPLE_TEAM_ID APPLE_NOTARIZE_USER APPLE_NOTARIZE_PASSWORD
+    IMU_RELEASE_OUTPUT_DIR='$out' bash '$REPO_DIR/scripts/sign-release.sh' '$app' '$daemon'
+  "
+  [ "$status" -eq 0 ]
+  [ -f "$out/SIGNING_STATUS" ]
+  [[ "$(cat "$out/SIGNING_STATUS")" == "unsigned" ]]
+}
+
+@test "sign-release.sh does not echo secret values" {
+  local app="$BATS_TEST_TMPDIR/IMUMenuBar.app"; mkdir -p "$app/Contents/MacOS"
+  local daemon="$BATS_TEST_TMPDIR/imu-watcher"; : > "$daemon"; chmod +x "$daemon"
+
+  # Distinctive sentinels — would never appear in real macOS tool output by accident.
+  local cert_sentinel="SENTINEL_CERT_VALUE_DO_NOT_LEAK_$$"
+  local pass_sentinel="SENTINEL_PASS_VALUE_DO_NOT_LEAK_$$"
+  local notarize_sentinel="SENTINEL_NOTARIZE_VALUE_DO_NOT_LEAK_$$"
+
+  # All four signing vars set so we get past the missing-creds gate, then
+  # the keychain import will fail because the cert is fake. The test checks
+  # that no failure path prints the secret values themselves.
+  run bash -c "
+    export APPLE_DEVELOPER_ID_CERT_BASE64='$cert_sentinel'
+    export APPLE_DEVELOPER_ID_CERT_PASSWORD='$pass_sentinel'
+    export APPLE_DEVELOPER_ID_NAME='Developer ID Application: Test (TEST123456)'
+    export APPLE_TEAM_ID='TEST123456'
+    export APPLE_NOTARIZE_USER='notarize@example.invalid'
+    export APPLE_NOTARIZE_PASSWORD='$notarize_sentinel'
+    bash '$REPO_DIR/scripts/sign-release.sh' '$app' '$daemon' 2>&1 || true
+  "
+  [[ "$output" != *"$cert_sentinel"* ]]
+  [[ "$output" != *"$pass_sentinel"* ]]
+  [[ "$output" != *"$notarize_sentinel"* ]]
+}
+
+@test "release-notes.sh labels artifacts SIGNED when SIGNING_STATUS=signed" {
+  local out="$BATS_TEST_TMPDIR/dist"; mkdir -p "$out"
+  printf 'signed\n' > "$out/SIGNING_STATUS"
+
+  run bash "$REPO_DIR/scripts/release-notes.sh" v9.9.9 "$out"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"## Artifacts"* ]]
+  [[ "$output" == *"(SIGNED"* ]]
+  [[ "$output" != *"(UNSIGNED)"* ]]
+}
+
+@test "release-notes.sh labels artifacts SIGNED & NOTARIZED when SIGNING_STATUS=signed-and-notarized" {
+  local out="$BATS_TEST_TMPDIR/dist"; mkdir -p "$out"
+  printf 'signed-and-notarized\n' > "$out/SIGNING_STATUS"
+
+  run bash "$REPO_DIR/scripts/release-notes.sh" v9.9.9 "$out"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SIGNED & NOTARIZED"* ]]
+  [[ "$output" != *"(UNSIGNED)"* ]]
+}
+
+@test "release-notes.sh defaults to UNSIGNED when SIGNING_STATUS is absent" {
+  local out="$BATS_TEST_TMPDIR/dist-empty"; mkdir -p "$out"
+  # Deliberately do NOT create $out/SIGNING_STATUS.
+
+  run bash "$REPO_DIR/scripts/release-notes.sh" v9.9.9 "$out"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"(UNSIGNED)"* ]]
+  [[ "$output" != *"SIGNED & NOTARIZED"* ]]
+}

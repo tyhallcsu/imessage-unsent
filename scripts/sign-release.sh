@@ -48,6 +48,17 @@ fi
 
 log() { printf '==> %s\n' "$*"; }
 
+# Write the signing status to ${IMU_RELEASE_OUTPUT_DIR}/SIGNING_STATUS so that
+# downstream tools (release-notes.sh, the workflow's release-body generator)
+# can label artifacts honestly. No-op if IMU_RELEASE_OUTPUT_DIR is unset, so
+# this script remains usable standalone.
+write_status() {
+  local status="$1"
+  if [[ -n "${IMU_RELEASE_OUTPUT_DIR:-}" && -d "${IMU_RELEASE_OUTPUT_DIR}" ]]; then
+    printf '%s\n' "$status" > "${IMU_RELEASE_OUTPUT_DIR}/SIGNING_STATUS"
+  fi
+}
+
 # --- Skip path: no signing creds ------------------------------------------
 
 missing_signing=()
@@ -59,6 +70,7 @@ missing_signing=()
 if [[ ${#missing_signing[@]} -gt 0 ]]; then
   log "Skipping codesign + notarize: missing env vars (${missing_signing[*]})."
   log "Artifacts will be UNSIGNED. See docs/code-signing.md to provision."
+  write_status unsigned
   exit 0
 fi
 
@@ -121,6 +133,7 @@ codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 if [[ -z "${APPLE_NOTARIZE_USER:-}" || -z "${APPLE_NOTARIZE_PASSWORD:-}" ]]; then
   log "Signing complete. Skipping notarization (APPLE_NOTARIZE_USER/PASSWORD absent)."
   log "Note: a signed-but-not-notarized .app still triggers Gatekeeper warnings on first launch."
+  write_status signed
   exit 0
 fi
 
@@ -152,4 +165,5 @@ spctl --assess --type execute --verbose=2 "$APP_PATH" || {
   echo "::warning::spctl assessment failed for $APP_PATH (review notarization log above)"
 }
 
+write_status signed-and-notarized
 log "Sign + notarize complete."

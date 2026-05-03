@@ -75,7 +75,9 @@ jobs:
 
       - name: Generate release notes
         run: |
-          bash scripts/release-notes.sh "$TAG" \
+          # Pass the dist dir so release-notes.sh can read SIGNING_STATUS and
+          # label artifacts honestly (UNSIGNED / SIGNED / SIGNED & NOTARIZED).
+          bash scripts/release-notes.sh "$TAG" dist \
             | sed "s/VERSION/${TAG}/g" \
             > release-notes.md
           echo "--- release notes preview ---"
