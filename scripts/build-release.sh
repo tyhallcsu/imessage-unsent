@@ -109,7 +109,11 @@ cp "$ROOT_DIR/gui/Info.plist" "$APP_CONTENTS/Info.plist"
 # --- Sign + notarize (credential-driven, skipped without secrets) ----------
 
 log "Sign + notarize step"
-bash "$ROOT_DIR/scripts/sign-release.sh" "$APP_STAGE" "$DAEMON_STAGE/imu-watcher"
+# Tell sign-release.sh where to drop the SIGNING_STATUS file so release-notes.sh
+# can read it later. Falls through harmlessly if sign-release.sh is invoked
+# directly outside this script.
+IMU_RELEASE_OUTPUT_DIR="$OUTPUT_DIR_ABS" \
+  bash "$ROOT_DIR/scripts/sign-release.sh" "$APP_STAGE" "$DAEMON_STAGE/imu-watcher"
 
 # --- Package -------------------------------------------------------------
 
@@ -125,6 +129,11 @@ log "Packaging GUI -> $GUI_ZIP_NAME"
 
 log "Done. Artifacts in $OUTPUT_DIR_ABS:"
 ( cd "$OUTPUT_DIR_ABS" && ls -lh "$DAEMON_TARBALL_NAME" "${DAEMON_TARBALL_NAME}.sha256" "$GUI_ZIP_NAME" "${GUI_ZIP_NAME}.sha256" )
-if [[ -z "${APPLE_DEVELOPER_ID_NAME:-}" ]]; then
-  log "Note: artifacts are UNSIGNED (no Developer ID env vars). See docs/code-signing.md."
-fi
+
+status_file="$OUTPUT_DIR_ABS/SIGNING_STATUS"
+status="$( [[ -f "$status_file" ]] && cat "$status_file" || echo unsigned )"
+case "$status" in
+  signed-and-notarized) log "Note: artifacts are SIGNED & NOTARIZED." ;;
+  signed)               log "Note: artifacts are SIGNED (not notarized — Gatekeeper will warn on first launch)." ;;
+  *)                    log "Note: artifacts are UNSIGNED. See docs/code-signing.md to provision Developer ID." ;;
+esac

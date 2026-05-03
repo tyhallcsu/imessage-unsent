@@ -71,28 +71,28 @@ make release-notes VERSION=v0.4.0
 
 ## Signing and notarization
 
-**Current status: artifacts are unsigned.** macOS Gatekeeper will warn on
-first launch. Users can clear the warning with
-`xattr -d com.apple.quarantine <path>` or wait for a signed build.
+The release pipeline signs the daemon binary and the GUI `.app` with
+Developer ID + Hardened Runtime, then submits the GUI to `xcrun notarytool`
+and staples the ticket — but **only when the operator has provisioned the
+Apple secrets** (see below). If any required secret is absent the sign step
+logs `Skipping codesign + notarize` and the workflow proceeds with unsigned
+artifacts, so forks and dry-run builds are never blocked.
 
-The plan to wire signing/notarization is tracked in
-[issue #20](https://github.com/tyhallcsu/imessage-unsent/issues/20).
-The release script is structured so that adding a `scripts/sign-release.sh`
-step in front of the `tar`/`zip` operations is a drop-in change.
+The signing pipeline itself is implemented in
+[`scripts/sign-release.sh`](../scripts/sign-release.sh) and documented in
+detail in [`docs/code-signing.md`](code-signing.md), which is the source of
+truth for:
 
-When signing is added, the following GitHub Actions secrets will be required:
+- The six `APPLE_*` secrets to set in repo Actions secrets.
+- How to provision the Developer ID Application certificate and an
+  app-specific password for `notarytool`.
+- How to verify a signed build (`codesign --verify`, `spctl --assess`,
+  `xcrun stapler validate`).
+- Troubleshooting the common failure modes.
 
-| Secret | Purpose |
-|---|---|
-| `APPLE_DEVELOPER_ID_CERT_BASE64` | Developer ID Application cert (`.p12`), base64-encoded |
-| `APPLE_DEVELOPER_ID_CERT_PASSWORD` | Password for the `.p12` |
-| `APPLE_NOTARIZE_USER` | App Store Connect API key issuer ID OR Apple ID for notarytool |
-| `APPLE_NOTARIZE_PASSWORD` | Notary service password (or App Store Connect API key) |
-| `APPLE_TEAM_ID` | Developer Team ID |
-
-If any are missing, the signing step will skip with a clear log and the
-unsigned artifacts will still be uploaded — forks should not be blocked from
-producing testable builds.
+The artifact section of the auto-generated release notes is labelled
+honestly: `(UNSIGNED)`, `(SIGNED)`, or `(SIGNED & NOTARIZED)` based on a
+`SIGNING_STATUS` file that `sign-release.sh` writes into the dist directory.
 
 ## What the workflow does, in order
 
@@ -101,9 +101,13 @@ producing testable builds.
 3. **Run tests** for both Swift packages — a red test gates the release.
 4. **`scripts/build-release.sh`** builds release-mode binaries, assembles the
    GUI .app bundle (with `CFBundleShortVersionString` and `CFBundleVersion`
-   set from the tag), and produces tarball + zip + sha256s.
+   set from the tag), invokes `scripts/sign-release.sh` to codesign +
+   (optionally) notarize and staple, then produces tarball + zip + sha256s.
+   The sign step writes `dist/SIGNING_STATUS` (`unsigned` / `signed` /
+   `signed-and-notarized`) for downstream consumers.
 5. **`scripts/release-notes.sh`** generates Markdown notes from conventional
-   commits since the previous tag.
+   commits since the previous tag, reading `dist/SIGNING_STATUS` to label
+   artifacts honestly.
 6. **Build a source tarball** (preserved from the v0.1 release process for
    downstream packagers).
 7. **`gh release create --draft`** uploads everything and creates a draft

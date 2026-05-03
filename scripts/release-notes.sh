@@ -2,8 +2,12 @@
 # Generate Markdown release notes from conventional commits since the previous
 # tag (or since the repo's first commit if this is the first tag).
 #
-# Usage: scripts/release-notes.sh <version>
-#   <version>  e.g. v0.4.0 (used to derive the "since previous tag" range)
+# Usage: scripts/release-notes.sh <version> [dist-dir]
+#   <version>   e.g. v0.4.0 (used to derive the "since previous tag" range)
+#   [dist-dir]  optional path to the build's dist directory (default: dist).
+#               If <dist-dir>/SIGNING_STATUS exists, its contents control the
+#               artifact labels in the "Artifacts" section. Missing file →
+#               unsigned (preserves the standalone-call behaviour).
 #
 # Output: Markdown to stdout. Sections:
 #   ## Highlights  (feat: commits)
@@ -16,11 +20,12 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "usage: $0 <version>" >&2
+  echo "usage: $0 <version> [dist-dir]" >&2
   exit 2
 fi
 
 VERSION="$1"
+DIST_DIR="${2:-dist}"
 
 # Find the previous tag, if any. `git describe` may not see the current tag if
 # we're invoked before it's pushed, so fall back to looking for any tag
@@ -104,14 +109,40 @@ print_section "Fixes" "$fixes"
 print_section "Documentation" "$docs"
 print_section "Other" "$other"
 
-cat <<'TAIL'
+# Render the Artifacts section honestly based on what sign-release.sh actually
+# did. The build-release.sh pipeline drops a SIGNING_STATUS file in the dist
+# directory at the end of its sign step.
+status_file="$DIST_DIR/SIGNING_STATUS"
+if [[ -f "$status_file" ]]; then
+  signing_status="$(tr -d '[:space:]' < "$status_file")"
+else
+  signing_status="unsigned"
+fi
+
+case "$signing_status" in
+  signed-and-notarized)
+    daemon_label="SIGNED"          # Mach-O binaries can't be stapled
+    gui_label="SIGNED & NOTARIZED"
+    footer_note=""
+    ;;
+  signed)
+    daemon_label="SIGNED"
+    gui_label="SIGNED (not notarized)"
+    footer_note=$'\n> [!NOTE]\n> Artifacts are signed but not notarized. macOS Gatekeeper may still warn on first launch. See `docs/code-signing.md` for the notarization step.'
+    ;;
+  *)
+    daemon_label="UNSIGNED"
+    gui_label="UNSIGNED"
+    footer_note=$'\n> [!NOTE]\n> Artifacts are unsigned. macOS Gatekeeper will warn on first launch. Use `xattr -d com.apple.quarantine <path>` to clear the warning, or see `docs/code-signing.md` to provision a signed build.'
+    ;;
+esac
+
+cat <<TAIL
 
 ## Artifacts
 
-- `imu-watcher-VERSION-<arch>.tar.gz` — daemon binary + recovery scripts + LaunchAgent template (UNSIGNED)
-- `IMUMenuBar-VERSION.zip` — menu bar app bundle (UNSIGNED)
-- Each artifact has a sibling `.sha256` file with the SHA-256 checksum.
-
-> [!NOTE]
-> Artifacts are unsigned. macOS Gatekeeper will warn on first launch. Use `xattr -d com.apple.quarantine <path>` to clear the warning, or wait for a signed/notarized build (tracked in issues #19 and #20).
+- \`imu-watcher-VERSION-<arch>.tar.gz\` — daemon binary + recovery scripts + LaunchAgent template (${daemon_label})
+- \`IMUMenuBar-VERSION.zip\` — menu bar app bundle (${gui_label})
+- Each artifact has a sibling \`.sha256\` file with the SHA-256 checksum.
+${footer_note}
 TAIL
