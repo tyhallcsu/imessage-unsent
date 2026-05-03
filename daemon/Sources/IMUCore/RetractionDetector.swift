@@ -254,14 +254,14 @@ private func sqliteMessage(_ database: OpaquePointer) -> String {
   return String(cString: message)
 }
 
-public func defaultMessagesChatDBURL(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+public func defaultMessagesChatDBURL(home: URL = imuUserHomeDirectory()) -> URL {
   home
     .appendingPathComponent("Library", isDirectory: true)
     .appendingPathComponent("Messages", isDirectory: true)
     .appendingPathComponent("chat.db", isDirectory: false)
 }
 
-public func defaultDetectorStateURL(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+public func defaultDetectorStateURL(home: URL = imuUserHomeDirectory()) -> URL {
   home
     .appendingPathComponent(".config", isDirectory: true)
     .appendingPathComponent("imessage-unsent", isDirectory: true)

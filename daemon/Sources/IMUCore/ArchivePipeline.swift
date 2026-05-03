@@ -394,7 +394,7 @@ private extension DateFormatter {
   }()
 }
 
-public func defaultMessagesDirURL(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+public func defaultMessagesDirURL(home: URL = imuUserHomeDirectory()) -> URL {
   home
     .appendingPathComponent("Library", isDirectory: true)
     .appendingPathComponent("Messages", isDirectory: true)

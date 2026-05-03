@@ -159,7 +159,7 @@ public final class FSWatcher {
   }
 }
 
-public func defaultMessagesWalURL(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+public func defaultMessagesWalURL(home: URL = imuUserHomeDirectory()) -> URL {
   home
     .appendingPathComponent("Library", isDirectory: true)
     .appendingPathComponent("Messages", isDirectory: true)
