@@ -78,6 +78,99 @@ final class FSWatcherTests: XCTestCase {
     }
   }
 
+  /// Issue #59: FSEvents on `~/Library/Messages` is unreliable for high-
+  /// frequency `chat.db-wal` writes. The polling fallback must detect a size
+  /// change even when FSEvents never delivers an event for it.
+  func testPollingFallbackDetectsSizeChangeWhenFSEventsDisabled() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("imu-fswatcher-poll-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer {
+      try? FileManager.default.removeItem(at: directory)
+    }
+
+    let walURL = directory.appendingPathComponent("chat.db-wal", isDirectory: false)
+    XCTAssertTrue(FileManager.default.createFile(atPath: walURL.path, contents: Data("seed".utf8)))
+
+    let pollFired = expectation(description: "polling fallback observes the size change")
+    let lock = NSLock()
+    var observedSizes: [Int64] = []
+    let watcher = FSWatcher(
+      walURL: walURL,
+      coalesceInterval: 0.05,
+      pollInterval: 0.1,
+      enableFSEvents: false
+    ) { size in
+      lock.withLock {
+        observedSizes.append(size)
+      }
+      if size == 15 {
+        pollFired.fulfill()
+      }
+    }
+
+    try watcher.start()
+    defer {
+      watcher.stop()
+    }
+
+    // Write directly via FileHandle. FSEvents is disabled for this test, so
+    // the only path that can detect this change is the 100ms polling timer.
+    let handle = try FileHandle(forWritingTo: walURL)
+    try handle.seekToEnd()
+    try handle.write(contentsOf: Data("-after-seed".utf8))
+    try handle.close()
+
+    wait(for: [pollFired], timeout: 3)
+    lock.withLock {
+      XCTAssertTrue(observedSizes.contains(15))
+    }
+  }
+
+  /// Both FSEvents and the polling timer share `lastReportedSize` for dedupe.
+  /// After a single write, the handler must fire exactly once even though the
+  /// poll keeps running.
+  func testPollingDoesNotRefireAfterSizeIsReported() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("imu-fswatcher-dedup-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer {
+      try? FileManager.default.removeItem(at: directory)
+    }
+
+    let walURL = directory.appendingPathComponent("chat.db-wal", isDirectory: false)
+    XCTAssertTrue(FileManager.default.createFile(atPath: walURL.path, contents: Data()))
+
+    let lock = NSLock()
+    var fireCount = 0
+    let watcher = FSWatcher(
+      walURL: walURL,
+      coalesceInterval: 0.05,
+      pollInterval: 0.1,
+      enableFSEvents: false
+    ) { _ in
+      lock.withLock {
+        fireCount += 1
+      }
+    }
+
+    try watcher.start()
+    defer {
+      watcher.stop()
+    }
+
+    let handle = try FileHandle(forWritingTo: walURL)
+    try handle.write(contentsOf: Data("once".utf8))
+    try handle.close()
+
+    // Wait long enough for several poll cycles after the size has stabilised.
+    Thread.sleep(forTimeInterval: 0.6)
+
+    lock.withLock {
+      XCTAssertEqual(fireCount, 1, "handler must fire exactly once per distinct size")
+    }
+  }
+
   private func runShellWriter(script: String, path: String) throws {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/sh")
