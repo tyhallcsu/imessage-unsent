@@ -105,9 +105,9 @@ public struct ArchiveHistoryReader {
     guard let manifestData = try? Data(contentsOf: manifestURL) else {
       return .failure("manifest.json missing or unreadable")
     }
-    let manifest: ManifestDTO
+    let manifest: ArchiveManifest
     do {
-      manifest = try JSONDecoder().decode(ManifestDTO.self, from: manifestData)
+      manifest = try JSONDecoder().decode(ArchiveManifest.self, from: manifestData)
     } catch {
       return .failure("manifest.json decode failed: \(error.localizedDescription)")
     }
@@ -153,25 +153,8 @@ public struct ArchiveHistoryReader {
   }()
 }
 
-private struct ManifestDTO: Decodable {
-  let detectedAt: String
-  let rowid: Int64
-  let handle: String
-  let recovery: RecoveryDTO?
-
-  enum CodingKeys: String, CodingKey {
-    case detectedAt = "detected_at"
-    case rowid
-    case handle
-    case recovery
-  }
-}
-
-private struct RecoveryDTO: Decodable {
-  let recovered: Bool
-  let error: String?
-}
-
+// recovery.json is written by scripts/recover.sh, not by ArchivePipeline, so it
+// stays a small private mirror — its schema lives in the shell tool.
 private struct RecoveryFileDTO: Decodable {
   let recovered: RecoveredFileDTO?
   let error: String?

@@ -39,6 +39,7 @@ But SQLite doesn't overwrite pages in place — it writes new page images to a *
 - [Recovery workflow](#recovery-workflow)
 - [Why the WAL vector works (byte-level)](#why-the-wal-vector-works-byte-level)
 - [Usage](#usage)
+- [Daemon control socket](#daemon-control-socket)
 - [Sanitized case study](#sanitized-case-study)
 - [Modes — Recover vs Restore](#modes--recover-vs-restore)
 - [Limitations](#limitations)
@@ -376,6 +377,38 @@ The script writes everything under `/tmp/imessage-recovery/` (override with `--w
 | `export/` (if installed)   | imessage-exporter output                               |
 
 For third-party iPhone backup locations, create `~/.config/imessage-unsent/iphone-backup-paths.txt` with one backup directory or direct `sms.db` path per line. `--include-iphone-backup` auto-discovery scans both MobileSync backups and those configured paths.
+
+## Daemon control socket
+
+When the watcher daemon is running it serves a **read-only** Unix-domain socket at `~/Library/Application Support/imessage-unsent/daemon.sock` (mode `0600`, same-user only). The menu-bar app uses it to render status and the recovery history; you can also probe it directly:
+
+```bash
+# liveness check
+echo '{"op":"ping"}' | nc -U ~/Library/Application\ Support/imessage-unsent/daemon.sock
+# {"ok":true,"pong":true}
+
+# daemon status
+echo '{"op":"status"}' | nc -U ~/Library/Application\ Support/imessage-unsent/daemon.sock
+# {"ok":true,"status":{"data_dir":"...","last_error":null,"last_wal_change_at":"...",
+#  "last_wal_size":4096,"notifications_show":true,"recovery_count":3,"started_at":"...",
+#  "state":"watching","uptime_seconds":42,"version":"0.2.0"}}
+
+# most recent recoveries (limit 1..50, default 5)
+echo '{"op":"recent","limit":3}' | nc -U ~/Library/Application\ Support/imessage-unsent/daemon.sock
+# {"ok":true,"recoveries":[{"archive_path":"...","detected_at":"...","error":null,
+#  "handle":"+15551234567","id":"2026-04-30T120000Z-101","recovered":true,"rowid":101,
+#  "text":"the recovered message text"}, ...]}
+```
+
+Wire format: newline-delimited JSON, one request → one response → server closes the connection. Legacy plaintext `ping` is still accepted for one release.
+
+The dispatcher is a hard allowlist of `ping`, `status`, and `recent`. Anything else (`restore`, `delete`, anything novel) returns:
+
+```json
+{"ok":false,"error":{"code":"read_only","message":"op X is not permitted: control server is read-only"}}
+```
+
+This is the IPC-boundary half of the Notify-only invariant — see [How the guardrail is enforced](#how-the-guardrail-is-enforced) for the file-layer half.
 
 ## Sanitized case study
 
