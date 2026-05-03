@@ -4,6 +4,7 @@ public enum IMURoute: Equatable {
   case history
   case settings
   case doctor
+  case about
   case archive(URL)
   case unknown
 }
@@ -19,6 +20,8 @@ public func routeIMUURL(_ url: URL) -> IMURoute {
     return .settings
   case "doctor":
     return .doctor
+  case "about":
+    return .about
   case "archive":
     let path = url.path
     guard !path.isEmpty else {
