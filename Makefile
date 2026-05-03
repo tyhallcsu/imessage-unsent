@@ -7,6 +7,7 @@ SHELL_SOURCES := scripts/*.sh scripts/lib/*.sh tests/fixtures/*.sh tests/bats/he
 .PHONY: fixture fixture-check shellcheck python-check bats python-test test \
 	daemon-build daemon-test daemon-install daemon-uninstall \
 	gui-build gui-test gui-run swift-test \
+	doctor \
 	release release-notes
 
 fixture:
@@ -56,6 +57,13 @@ gui-run:
 	bash script/build_and_run.sh run
 
 swift-test: daemon-test gui-test
+
+# Headless subset of the GUI's App Doctor — useful when the menu bar app can't
+# launch (FDA prompt loop, Gatekeeper) or for SSH troubleshooting. Output
+# matches the GUI's Diagnostics report so users can paste either source into a
+# GitHub issue.
+doctor:
+	bash scripts/app_doctor.sh
 
 # Build distributable release artifacts (daemon tarball + GUI .app zip + sha256s).
 # Usage: make release VERSION=v0.4.0

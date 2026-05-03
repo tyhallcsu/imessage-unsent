@@ -33,6 +33,11 @@ struct IMUMenuBarApp: App {
       SettingsWindow(model: model, settingsModel: settingsModel)
     }
     .handlesExternalEvents(matching: ["settings"])
+
+    Window("imessage-unsent Doctor", id: "doctor") {
+      DoctorWindow()
+    }
+    .handlesExternalEvents(matching: ["doctor"])
   }
 
   private func handle(route: IMURoute) {
@@ -41,6 +46,8 @@ struct IMUMenuBarApp: App {
       openWindow(id: "history")
     case .settings:
       openWindow(id: "settings")
+    case .doctor:
+      openWindow(id: "doctor")
     case let .archive(folderURL):
       NSWorkspace.shared.open(folderURL)
     case .unknown:
