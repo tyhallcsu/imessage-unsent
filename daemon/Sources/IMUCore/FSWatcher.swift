@@ -21,19 +21,29 @@ public final class FSWatcher {
   private let walURL: URL
   private let watchRoot: URL
   private let coalesceInterval: TimeInterval
+  private let pollInterval: TimeInterval
+  private let enableFSEvents: Bool
   private let handler: ChangeHandler
   private let queue: DispatchQueue
   private var stream: FSEventStreamRef?
   private var pendingCallback: DispatchWorkItem?
+  private var pollTimer: DispatchSourceTimer?
+  // -1 sentinel = never reported. Set to the current size on start() so the
+  // first poll cycle does not spuriously fire on the file's pre-existing size.
+  private var lastReportedSize: Int64 = -1
 
   public init(
     walURL: URL = defaultMessagesWalURL(),
     coalesceInterval: TimeInterval = 0.25,
+    pollInterval: TimeInterval = 1.0,
+    enableFSEvents: Bool = true,
     handler: @escaping ChangeHandler
   ) {
     self.walURL = walURL.standardizedFileURL
     self.watchRoot = walURL.deletingLastPathComponent().standardizedFileURL
     self.coalesceInterval = coalesceInterval
+    self.pollInterval = pollInterval
+    self.enableFSEvents = enableFSEvents
     self.handler = handler
     self.queue = DispatchQueue(label: "com.imu.watcher.fsevents")
   }
@@ -44,7 +54,7 @@ public final class FSWatcher {
 
   public func start() throws {
     try queue.sync {
-      guard stream == nil else {
+      guard stream == nil, pollTimer == nil else {
         return
       }
 
@@ -52,41 +62,59 @@ public final class FSWatcher {
         throw FSWatcherError.parentDirectoryMissing(watchRoot.path)
       }
 
-      let eventLatency = min(coalesceInterval, 0.05)
-      var context = FSEventStreamContext(
-        version: 0,
-        info: Unmanaged.passUnretained(self).toOpaque(),
-        retain: nil,
-        release: nil,
-        copyDescription: nil
-      )
-      let pathsToWatch = [watchRoot.path] as CFArray
-      let flags = FSEventStreamCreateFlags(
-        kFSEventStreamCreateFlagFileEvents |
-          kFSEventStreamCreateFlagUseCFTypes |
-          kFSEventStreamCreateFlagNoDefer
-      )
+      if enableFSEvents {
+        let eventLatency = min(coalesceInterval, 0.05)
+        var context = FSEventStreamContext(
+          version: 0,
+          info: Unmanaged.passUnretained(self).toOpaque(),
+          retain: nil,
+          release: nil,
+          copyDescription: nil
+        )
+        let pathsToWatch = [watchRoot.path] as CFArray
+        let flags = FSEventStreamCreateFlags(
+          kFSEventStreamCreateFlagFileEvents |
+            kFSEventStreamCreateFlagUseCFTypes |
+            kFSEventStreamCreateFlagNoDefer
+        )
 
-      guard let newStream = FSEventStreamCreate(
-        kCFAllocatorDefault,
-        Self.handleEvents,
-        &context,
-        pathsToWatch,
-        FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
-        eventLatency,
-        flags
-      ) else {
-        throw FSWatcherError.streamCreationFailed(walURL.path)
+        guard let newStream = FSEventStreamCreate(
+          kCFAllocatorDefault,
+          Self.handleEvents,
+          &context,
+          pathsToWatch,
+          FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+          eventLatency,
+          flags
+        ) else {
+          throw FSWatcherError.streamCreationFailed(walURL.path)
+        }
+
+        FSEventStreamSetDispatchQueue(newStream, queue)
+        guard FSEventStreamStart(newStream) else {
+          FSEventStreamInvalidate(newStream)
+          FSEventStreamRelease(newStream)
+          throw FSWatcherError.streamCreationFailed(walURL.path)
+        }
+
+        stream = newStream
       }
 
-      FSEventStreamSetDispatchQueue(newStream, queue)
-      guard FSEventStreamStart(newStream) else {
-        FSEventStreamInvalidate(newStream)
-        FSEventStreamRelease(newStream)
-        throw FSWatcherError.streamCreationFailed(walURL.path)
-      }
+      lastReportedSize = Self.fileSize(at: walURL)
 
-      stream = newStream
+      if pollInterval > 0 {
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(
+          deadline: .now() + pollInterval,
+          repeating: pollInterval,
+          leeway: .milliseconds(100)
+        )
+        timer.setEventHandler { [weak self] in
+          self?.pollWAL()
+        }
+        timer.resume()
+        pollTimer = timer
+      }
     }
   }
 
@@ -95,14 +123,15 @@ public final class FSWatcher {
       pendingCallback?.cancel()
       pendingCallback = nil
 
-      guard let activeStream = stream else {
-        return
-      }
+      pollTimer?.cancel()
+      pollTimer = nil
 
-      FSEventStreamStop(activeStream)
-      FSEventStreamInvalidate(activeStream)
-      FSEventStreamRelease(activeStream)
-      stream = nil
+      if let activeStream = stream {
+        FSEventStreamStop(activeStream)
+        FSEventStreamInvalidate(activeStream)
+        FSEventStreamRelease(activeStream)
+        stream = nil
+      }
     }
   }
 
@@ -140,6 +169,17 @@ public final class FSWatcher {
     scheduleCoalescedCallback()
   }
 
+  /// Called by the polling timer on `queue`. Detects size changes that
+  /// FSEvents may have missed (a known macOS quirk for high-frequency writes
+  /// inside TCC-protected directories like `~/Library/Messages`). Issue #59.
+  private func pollWAL() {
+    let currentSize = Self.fileSize(at: walURL)
+    guard currentSize != lastReportedSize else {
+      return
+    }
+    scheduleCoalescedCallback()
+  }
+
   private func scheduleCoalescedCallback() {
     guard pendingCallback == nil else {
       return
@@ -151,7 +191,9 @@ public final class FSWatcher {
       }
 
       pendingCallback = nil
-      handler(Self.fileSize(at: walURL))
+      let size = Self.fileSize(at: walURL)
+      lastReportedSize = size
+      handler(size)
     }
 
     pendingCallback = callback
