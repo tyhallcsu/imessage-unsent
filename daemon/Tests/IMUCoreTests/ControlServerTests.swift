@@ -135,6 +135,53 @@ final class ControlServerTests: XCTestCase {
     XCTAssertEqual(error["code"] as? String, "bad_request")
   }
 
+  func testDeleteRemovesArchiveAndReturnsId() throws {
+    let id = "2026-04-30T120000Z-101"
+    let target = archivesDir.appendingPathComponent(id, isDirectory: true)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: target.path), "fixture archive must exist before delete")
+
+    let response = try roundTrip(#"{"op":"delete","id":"\#(id)"}"#)
+    XCTAssertEqual(response["ok"] as? Bool, true)
+    XCTAssertEqual(response["deleted"] as? String, id)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: target.path), "archive dir should be gone after delete")
+
+    // After deletion, recent should report no recoveries.
+    let recent = try roundTrip(#"{"op":"recent","limit":5}"#)
+    let recoveries = try XCTUnwrap(recent["recoveries"] as? [[String: Any]])
+    XCTAssertEqual(recoveries.count, 0, "recent should be empty after the only archive is deleted")
+  }
+
+  func testDeleteRejectsMissingId() throws {
+    let response = try roundTrip(#"{"op":"delete"}"#)
+    XCTAssertEqual(response["ok"] as? Bool, false)
+    let error = try XCTUnwrap(response["error"] as? [String: Any])
+    XCTAssertEqual(error["code"] as? String, "bad_request")
+    XCTAssertTrue((error["message"] as? String ?? "").contains("id"))
+  }
+
+  func testDeleteRejectsMalformedId() throws {
+    // Path-traversal and other non-archive-shaped strings must be rejected
+    // before hitting the filesystem.
+    for badID in ["../etc/passwd", "foo", "../2026-04-30T120000Z-101", "2026-04-30T120000Z-101/.."] {
+      let escaped = badID.replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+      let response = try roundTrip(#"{"op":"delete","id":"\#(escaped)"}"#)
+      XCTAssertEqual(response["ok"] as? Bool, false, "expected delete to reject id=\(badID)")
+      let error = try XCTUnwrap(response["error"] as? [String: Any])
+      XCTAssertEqual(error["code"] as? String, "bad_request", "expected bad_request for id=\(badID)")
+    }
+    // Fixture archive must still be on disk after every rejection.
+    let target = archivesDir.appendingPathComponent("2026-04-30T120000Z-101", isDirectory: true)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: target.path), "rejection must not remove anything")
+  }
+
+  func testDeleteWellFormedButMissingReturnsNotFound() throws {
+    let response = try roundTrip(#"{"op":"delete","id":"2099-01-01T000000Z-999"}"#)
+    XCTAssertEqual(response["ok"] as? Bool, false)
+    let error = try XCTUnwrap(response["error"] as? [String: Any])
+    XCTAssertEqual(error["code"] as? String, "not_found")
+  }
+
   // MARK: - Helpers
 
   private func roundTrip(_ request: String) throws -> [String: Any] {

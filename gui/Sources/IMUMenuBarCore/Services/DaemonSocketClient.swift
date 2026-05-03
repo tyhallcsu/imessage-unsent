@@ -8,6 +8,11 @@ public protocol DaemonPinging {
 public protocol DaemonControlClienting: DaemonPinging {
   func status() -> DaemonStatusInfo?
   func recent(limit: Int) -> [ArchiveHistoryEntryDTO]
+  func delete(id: String) -> Bool
+}
+
+public protocol ArchiveDeleting {
+  func deleteArchive(id: String) -> Bool
 }
 
 public final class DaemonControlClient: DaemonControlClienting {
@@ -51,6 +56,13 @@ public final class DaemonControlClient: DaemonControlClienting {
       }
       return try? JSONDecoder().decode(ArchiveHistoryEntryDTO.self, from: data)
     }
+  }
+
+  public func delete(id: String) -> Bool {
+    guard !id.isEmpty else { return false }
+    let payload: [String: Any] = ["op": "delete", "id": id]
+    guard let response = sendRequest(payload) else { return false }
+    return (response["ok"] as? Bool) == true
   }
 
   private func sendRequest(_ payload: [String: Any]) -> [String: Any]? {
@@ -150,6 +162,20 @@ public struct DaemonSocketClient: DaemonPinging {
 
   public func ping() -> Bool {
     client.ping()
+  }
+}
+
+/// Adapts `DaemonControlClienting` to the narrower `ArchiveDeleting` protocol
+/// the model depends on.
+public struct DaemonArchiveDeleter: ArchiveDeleting {
+  private let client: DaemonControlClienting
+
+  public init(client: DaemonControlClienting) {
+    self.client = client
+  }
+
+  public func deleteArchive(id: String) -> Bool {
+    client.delete(id: id)
   }
 }
 

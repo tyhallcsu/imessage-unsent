@@ -96,6 +96,30 @@ final class DaemonControlClientTests: XCTestCase {
     XCTAssertEqual(json["limit"] as? Int, 50)
   }
 
+  func testDeleteSendsIdAndReportsSuccess() throws {
+    server = try startFakeServer(response: #"{"ok":true,"deleted":"2026-04-30T120000Z-101"}"#)
+    let client = DaemonControlClient(socketURL: socketURL)
+
+    XCTAssertTrue(client.delete(id: "2026-04-30T120000Z-101"))
+
+    let request = server.lastRequest()
+    let json = try XCTUnwrap(JSONSerialization.jsonObject(with: request) as? [String: Any])
+    XCTAssertEqual(json["op"] as? String, "delete")
+    XCTAssertEqual(json["id"] as? String, "2026-04-30T120000Z-101")
+  }
+
+  func testDeleteReturnsFalseOnDaemonError() throws {
+    server = try startFakeServer(response: #"{"ok":false,"error":{"code":"not_found","message":"archive not found"}}"#)
+    let client = DaemonControlClient(socketURL: socketURL)
+
+    XCTAssertFalse(client.delete(id: "2099-01-01T000000Z-1"))
+  }
+
+  func testDeleteRejectsEmptyIdLocallyWithoutHittingServer() {
+    let client = DaemonControlClient(socketURL: socketURL)
+    XCTAssertFalse(client.delete(id: ""))
+  }
+
   // MARK: - Helpers
 
   private func startFakeServer(response: String) throws -> FakeUnixSocketServer {

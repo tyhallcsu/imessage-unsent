@@ -50,7 +50,7 @@ public struct DaemonStatusInfo: Codable, Equatable {
   }
 }
 
-public struct ArchiveHistoryEntryDTO: Codable, Equatable {
+public struct ArchiveHistoryEntryDTO: Codable, Equatable, Identifiable {
   public let id: String
   public let detectedAt: String
   public let handle: String
