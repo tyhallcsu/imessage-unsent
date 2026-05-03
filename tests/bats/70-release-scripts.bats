@@ -227,7 +227,10 @@ load helpers
   run bash "$REPO_DIR/scripts/release-notes.sh" v9.9.9 "$out"
   [ "$status" -eq 0 ]
   [[ "$output" == *"## Artifacts"* ]]
-  [[ "$output" == *"(SIGNED"* ]]
+  # Specifically the signed-only branch — must include the "not notarized"
+  # qualifier on the GUI bullet, and must NOT include the notarized label.
+  [[ "$output" == *"SIGNED (not notarized)"* ]]
+  [[ "$output" != *"SIGNED & NOTARIZED"* ]]
   [[ "$output" != *"(UNSIGNED)"* ]]
 }
 

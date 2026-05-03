@@ -108,6 +108,13 @@ cp "$ROOT_DIR/gui/Info.plist" "$APP_CONTENTS/Info.plist"
 
 # --- Sign + notarize (credential-driven, skipped without secrets) ----------
 
+# Clear any stale SIGNING_STATUS from a previous run before invoking the sign
+# script. Without this, a local rebuild after a partial sign failure could
+# inherit the previous run's status and mislabel the new artifacts. CI is
+# unaffected (dist/ is fresh per workflow run); this matters for repeated
+# local builds.
+rm -f "$OUTPUT_DIR_ABS/SIGNING_STATUS"
+
 log "Sign + notarize step"
 # Tell sign-release.sh where to drop the SIGNING_STATUS file so release-notes.sh
 # can read it later. Falls through harmlessly if sign-release.sh is invoked
