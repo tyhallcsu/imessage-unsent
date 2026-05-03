@@ -39,6 +39,7 @@ But SQLite doesn't overwrite pages in place — it writes new page images to a *
 - [Recovery workflow](#recovery-workflow)
 - [Why the WAL vector works (byte-level)](#why-the-wal-vector-works-byte-level)
 - [Usage](#usage)
+- [Run the daemon and menu bar app](#run-the-daemon-and-menu-bar-app)
 - [Daemon control socket](#daemon-control-socket)
 - [Sanitized case study](#sanitized-case-study)
 - [Modes — Recover vs Restore](#modes--recover-vs-restore)
@@ -377,6 +378,64 @@ The script writes everything under `/tmp/imessage-recovery/` (override with `--w
 | `export/` (if installed)   | imessage-exporter output                               |
 
 For third-party iPhone backup locations, create `~/.config/imessage-unsent/iphone-backup-paths.txt` with one backup directory or direct `sms.db` path per line. `--include-iphone-backup` auto-discovery scans both MobileSync backups and those configured paths.
+
+## Run the daemon and menu bar app
+
+The CLI above is a one-shot recovery tool. The continuously-running watcher daemon + menu-bar app give you the same recovery automatically the moment a sender unsends a message — without you having to run anything by hand.
+
+```bash
+# Build + install the user LaunchAgent (writes to ~/Library/LaunchAgents and
+# bootstraps it under your gui session). Idempotent — safe to re-run.
+make daemon-install
+
+# Build + launch the menu-bar app (no Dock icon, just a menu-bar status item).
+make gui-run
+```
+
+Now grant Full Disk Access **to the installed daemon binary** (not the build-tree binary) so it can read `~/Library/Messages/chat.db`:
+
+```
+System Settings → Privacy & Security → Full Disk Access → +
+  ~/Library/Application Support/imessage-unsent/bin/imu-watcher
+```
+
+The menu-bar icon flips from `xmark.octagon` (Daemon Down) to `checkmark.circle` (Watching) within ~2 seconds of the daemon being able to start. From there:
+
+- **"Open History"** → window listing recovered messages, "Open archive" reveals the archive folder in Finder.
+- **"Open Settings"** → daemon status, version, uptime, recovery count, last error, data dir.
+- The daemon also fires a native macOS notification on each recovery (the first one will trigger the macOS notification permission prompt).
+
+Where things live after `make daemon-install`:
+
+| Path                                                              | Purpose                                  |
+| ----------------------------------------------------------------- | ---------------------------------------- |
+| `~/Library/LaunchAgents/com.imu.watcher.plist`                    | LaunchAgent definition                   |
+| `~/Library/Application Support/imessage-unsent/bin/imu-watcher`   | Installed daemon binary                  |
+| `~/Library/Application Support/imessage-unsent/scripts/`          | Copy of `scripts/` used by recovery      |
+| `~/Library/Application Support/imessage-unsent/archives/`         | One subdirectory per recovery (mode 0700)|
+| `~/Library/Application Support/imessage-unsent/daemon.sock`       | Read-only control socket (mode 0600)     |
+| `~/Library/Logs/imessage-unsent/watcher.log`                      | Daemon stdout + stderr                   |
+| `~/.config/imessage-unsent/config.toml`                           | Optional config (defaults are fine)      |
+
+Tail the daemon log:
+
+```bash
+tail -f ~/Library/Logs/imessage-unsent/watcher.log
+```
+
+Uninstall (`launchctl bootout` + remove plist + remove installed binary/scripts):
+
+```bash
+make daemon-uninstall
+```
+
+Other useful targets:
+
+```bash
+make daemon-build    # swift build daemon -c release (no install)
+make gui-build       # swift build gui -c release (no app bundle)
+make swift-test      # daemon + gui swift test in one shot
+```
 
 ## Daemon control socket
 
