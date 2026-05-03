@@ -80,6 +80,73 @@ public struct ConfigStore {
     return Self.parse(text)
   }
 
+  /// Atomically serializes `config` to TOML and writes it to `url`. Creates
+  /// parent directories with `0o700` if missing. Always reflects the full
+  /// config — comments in any pre-existing file are NOT preserved (this is
+  /// the same behavior as TOMLKit and tomli_w; users who want comments can
+  /// use the GUI which never round-trips them away unintentionally because
+  /// the field set is fixed).
+  public func save(_ config: DaemonConfig) throws {
+    let parent = url.deletingLastPathComponent()
+    try FileManager.default.createDirectory(
+      at: parent,
+      withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700]
+    )
+    let text = Self.serialize(config)
+    try text.write(to: url, atomically: true, encoding: .utf8)
+  }
+
+  /// Returns the canonical TOML representation of `config`. The output round-
+  /// trips through `parse` to an `Equatable` value (`parse(serialize(c)) == c`).
+  public static func serialize(_ config: DaemonConfig) -> String {
+    var lines: [String] = []
+    lines.append("# imessage-unsent daemon config")
+    lines.append("# Managed by the menu bar Settings pane; safe to edit by hand.")
+    lines.append("")
+    lines.append("log_level = \(quote(config.logLevel))")
+    lines.append("data_dir = \(quote(config.dataDir))")
+    lines.append("archive_retention = \(config.archiveRetention)")
+    lines.append("")
+    lines.append("[notifications]")
+    lines.append("show = \(config.notifications.show)")
+    lines.append("preview_chars = \(config.notifications.previewChars)")
+    lines.append("webhook = \(quote(config.notifications.webhook))")
+    lines.append("webhook_signing_secret = \(quote(config.notifications.webhookSigningSecret))")
+    lines.append("")
+    lines.append("[experimental]")
+    lines.append("restore_mode = \(config.experimental.restoreMode)")
+    return lines.joined(separator: "\n") + "\n"
+  }
+
+  private static func quote(_ value: String) -> String {
+    // TOML basic-string escapes: backslash, quote, control chars. The config
+    // values we care about are user paths, URLs, and short secrets — none of
+    // which legitimately contain control chars or newlines, so we keep this
+    // minimal and reject anything with embedded newlines by collapsing them.
+    var escaped = ""
+    escaped.reserveCapacity(value.count + 2)
+    escaped.append("\"")
+    for character in value {
+      switch character {
+      case "\\":
+        escaped.append("\\\\")
+      case "\"":
+        escaped.append("\\\"")
+      case "\n":
+        escaped.append("\\n")
+      case "\r":
+        escaped.append("\\r")
+      case "\t":
+        escaped.append("\\t")
+      default:
+        escaped.append(character)
+      }
+    }
+    escaped.append("\"")
+    return escaped
+  }
+
   public static func parse(_ text: String) -> DaemonConfig {
     var config = DaemonConfig()
     var section = ""
@@ -162,10 +229,29 @@ public struct ConfigStore {
 
   private static func parseString(_ value: String) -> String {
     let trimmed = value.trimmingCharacters(in: .whitespaces)
-    if trimmed.hasPrefix("\""), trimmed.hasSuffix("\""), trimmed.count >= 2 {
-      return String(trimmed.dropFirst().dropLast())
+    guard trimmed.hasPrefix("\""), trimmed.hasSuffix("\""), trimmed.count >= 2 else {
+      return trimmed
     }
-    return trimmed
+    let inner = trimmed.dropFirst().dropLast()
+    var result = ""
+    result.reserveCapacity(inner.count)
+    var iterator = inner.makeIterator()
+    while let character = iterator.next() {
+      guard character == "\\" else {
+        result.append(character)
+        continue
+      }
+      switch iterator.next() {
+      case "\\": result.append("\\")
+      case "\"": result.append("\"")
+      case "n": result.append("\n")
+      case "r": result.append("\r")
+      case "t": result.append("\t")
+      case let other?: result.append(other) // unknown escape: keep the next char verbatim
+      case nil: break
+      }
+    }
+    return result
   }
 
   private static func parseBool(_ value: String) -> Bool? {

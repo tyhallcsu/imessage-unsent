@@ -7,6 +7,7 @@ import SwiftUI
 struct IMUMenuBarApp: App {
   @NSApplicationDelegateAdaptor(IMUAppDelegate.self) private var appDelegate
   @StateObject private var model = MenuBarModel()
+  @StateObject private var settingsModel = SettingsModel()
   @Environment(\.openWindow) private var openWindow
 
   var body: some Scene {
@@ -29,7 +30,7 @@ struct IMUMenuBarApp: App {
     .handlesExternalEvents(matching: ["history"])
 
     Window("imessage-unsent Settings", id: "settings") {
-      SettingsWindow(model: model)
+      SettingsWindow(model: model, settingsModel: settingsModel)
     }
     .handlesExternalEvents(matching: ["settings"])
   }
