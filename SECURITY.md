@@ -30,6 +30,10 @@ Do **not** use this tooling to:
 
 The author does not condone, and will not provide support for, any use that violates the [Computer Fraud and Abuse Act](https://www.law.cornell.edu/uscode/text/18/1030), [ECPA](https://www.law.cornell.edu/uscode/text/18/2511), state privacy laws, or equivalent statutes in your jurisdiction.
 
+## Legal & ethics
+
+The operator-facing legal and ethics framework — intended scope, off-limits uses, the technical distinction between passive read / mutation / interception, statute-by-statute notes (CFAA, ECPA / Wiretap Act, California § 502 and § 632, Apple's iCloud ToS, GDPR / UK DPA 2018), and the language the GUI's first-run consent dialog must surface — lives in [`docs/legal-and-ethics.md`](docs/legal-and-ethics.md). That document is **not legal advice**; it exists to give operators a starting framework and to point you at the right reading material before you act in non-routine situations.
+
 ## Reporting a vulnerability
 
 If you find a defect in the recovery scripts (e.g., a command-injection bug in the bash wrapper, a path-traversal bug in the Python decoder, a way the script could damage `chat.db` despite operating only on snapshot copies), please open a GitHub issue or email the maintainer. Do not include real `chat.db` contents in the report.
