@@ -50,6 +50,12 @@ struct IMUMenuBarApp: App {
       DoctorWindow()
     }
     .handlesExternalEvents(matching: ["doctor"])
+
+    Window("About imessage-unsent", id: "about") {
+      AboutWindow()
+    }
+    .windowResizability(.contentSize)
+    .handlesExternalEvents(matching: ["about"])
   }
 
   private func handle(route: IMURoute) {
@@ -60,6 +66,8 @@ struct IMUMenuBarApp: App {
       openWindow(id: "settings")
     case .doctor:
       openWindow(id: "doctor")
+    case .about:
+      openWindow(id: "about")
     case let .archive(folderURL):
       NSWorkspace.shared.open(folderURL)
     case .unknown:
