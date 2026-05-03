@@ -36,6 +36,7 @@ But SQLite doesn't overwrite pages in place — it writes new page images to a *
 - [How iMessage retraction actually works](#how-imessage-retraction-actually-works)
 - [chat.db schema deep-dive](#chatdb-schema-deep-dive)
 - [The six recovery vectors](#the-six-recovery-vectors)
+- [Architecture diagrams](docs/architecture.md)
 - [Recovery workflow](#recovery-workflow)
 - [Why the WAL vector works (byte-level)](#why-the-wal-vector-works-byte-level)
 - [Usage](#usage)
