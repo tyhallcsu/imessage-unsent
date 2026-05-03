@@ -155,7 +155,7 @@ ORDER BY c.ROWID LIMIT 1;
 
 ## The six recovery vectors
 
-Run them in order. Stop at the first hit.
+Run them in order. Stop at the first hit. For the per-vector technical reference (exact code paths, files written, failure modes, byte-level subtleties), see [`docs/recovery-vectors.md`](docs/recovery-vectors.md).
 
 ### Vector 0 — freeze state immediately
 
