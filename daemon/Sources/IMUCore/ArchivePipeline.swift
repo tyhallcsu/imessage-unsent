@@ -108,7 +108,18 @@ public struct ArchivePipeline {
       if fileManager.fileExists(atPath: destination.path) {
         try fileManager.removeItem(at: destination)
       }
-      try fileManager.copyItem(at: source, to: destination)
+      switch ArchiveCloner.clone(from: source, to: destination) {
+      case .cloned:
+        break
+      case .unsupported:
+        try fileManager.copyItem(at: source, to: destination)
+      case .failed(let err):
+        throw NSError(
+          domain: NSPOSIXErrorDomain,
+          code: Int(err),
+          userInfo: [NSLocalizedDescriptionKey: "clonefile(\(name)) failed: errno=\(err)"]
+        )
+      }
       try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
       let archiveMtime = fileMtime(destination)
 
