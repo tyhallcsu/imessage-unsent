@@ -151,7 +151,7 @@ load helpers
   [[ "$output" == *"expected daemon binary at"* ]]
 }
 
-@test "sign-release.sh skips with clear log when no signing creds present" {
+@test "sign-release.sh ad-hoc signs with clear log when no signing creds present" {
   local app="$BATS_TEST_TMPDIR/IMUMenuBar.app"; mkdir -p "$app/Contents/MacOS"
   local daemon="$BATS_TEST_TMPDIR/imu-watcher"; : > "$daemon"; chmod +x "$daemon"
 
@@ -160,7 +160,7 @@ load helpers
     bash '$REPO_DIR/scripts/sign-release.sh' '$app' '$daemon'
   "
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Skipping codesign + notarize"* ]]
+  [[ "$output" == *"ad-hoc signing instead"* ]]
   [[ "$output" == *"APPLE_DEVELOPER_ID_CERT_BASE64"* ]]
   [[ "$output" == *"docs/code-signing.md"* ]]
 }

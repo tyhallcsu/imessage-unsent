@@ -6,6 +6,19 @@ struct RecoveryRowView: View {
   let entry: ArchiveHistoryEntryDTO
   let displayName: String?
   let avatarImageData: Data?
+  let archiveStats: ArchiveStatsProvider.Stats?
+
+  init(
+    entry: ArchiveHistoryEntryDTO,
+    displayName: String?,
+    avatarImageData: Data?,
+    archiveStats: ArchiveStatsProvider.Stats? = nil
+  ) {
+    self.entry = entry
+    self.displayName = displayName
+    self.avatarImageData = avatarImageData
+    self.archiveStats = archiveStats
+  }
 
   var body: some View {
     HStack(alignment: .top, spacing: 12) {
@@ -26,6 +39,25 @@ struct RecoveryRowView: View {
           Text(Self.relativeTimeString(from: entry.detectedAt))
             .font(.caption)
             .foregroundStyle(.secondary)
+          if let archiveStats {
+            Text("·")
+              .foregroundStyle(.tertiary)
+            Text(archiveStats.humanSize)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .help("Archive size on disk: \(archiveStats.bytes) bytes across \(archiveStats.fileCount) files")
+          }
+          if entry.isCompacted {
+            Text("·")
+              .foregroundStyle(.tertiary)
+            Text("Compacted")
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+              .padding(.horizontal, 4)
+              .padding(.vertical, 1)
+              .background(RoundedRectangle(cornerRadius: 3).fill(Color.gray.opacity(0.18)))
+              .help("Snapshot files dropped to reclaim disk space; recovered text retained.")
+          }
         }
       }
 
