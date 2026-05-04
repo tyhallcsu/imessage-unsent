@@ -188,6 +188,82 @@ final class RetractionDetectorTests: XCTestCase {
     XCTAssertEqual(persisted.attemptCounts, [:])
   }
 
+  func testProcessedGUIDsCapEvictsLexicographicallySmallestEntries() throws {
+    let fixture = try makeDetectorFixture()
+    defer {
+      try? FileManager.default.removeItem(at: fixture.directory)
+    }
+
+    let detector = try RetractionDetector(
+      chatDBURL: fixture.chatDBURL,
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      maxProcessedGUIDs: 4
+    )
+
+    for guid in ["guid-005", "guid-001", "guid-003", "guid-002"] {
+      try detector.markRecovered(guid: guid)
+    }
+    XCTAssertEqual(detector.currentState().processedGUIDs, ["guid-001", "guid-002", "guid-003", "guid-005"])
+
+    try detector.markRecovered(guid: "guid-004")
+    let afterOverflow = detector.currentState().processedGUIDs
+    XCTAssertEqual(afterOverflow.count, 4)
+    XCTAssertEqual(afterOverflow, ["guid-002", "guid-003", "guid-004", "guid-005"])
+
+    let persisted = try DetectorStateStore(url: fixture.stateURL).load()
+    XCTAssertEqual(persisted.processedGUIDs, afterOverflow)
+  }
+
+  func testProcessedGUIDsCapHoldsAfterManyMarkRecoveredCalls() throws {
+    let fixture = try makeDetectorFixture()
+    defer {
+      try? FileManager.default.removeItem(at: fixture.directory)
+    }
+
+    let cap = 64
+    let detector = try RetractionDetector(
+      chatDBURL: fixture.chatDBURL,
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      maxProcessedGUIDs: cap
+    )
+
+    for index in 0..<500 {
+      try detector.markRecovered(guid: String(format: "guid-%05d", index))
+    }
+
+    let processed = detector.currentState().processedGUIDs
+    XCTAssertEqual(processed.count, cap)
+    XCTAssertEqual(processed.first, String(format: "guid-%05d", 500 - cap))
+    XCTAssertEqual(processed.last, "guid-00499")
+  }
+
+  func testAttemptCountsCapEvictsLexicographicallySmallestKeys() throws {
+    let fixture = try makeDetectorFixture()
+    defer {
+      try? FileManager.default.removeItem(at: fixture.directory)
+    }
+
+    let detector = try RetractionDetector(
+      chatDBURL: fixture.chatDBURL,
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      maxAttempts: 100,
+      maxAttemptCounts: 3
+    )
+
+    try detector.markFailed(guid: "guid-c")
+    try detector.markFailed(guid: "guid-a")
+    try detector.markFailed(guid: "guid-b")
+    XCTAssertEqual(detector.currentState().attemptCounts.count, 3)
+
+    try detector.markFailed(guid: "guid-d")
+    let counts = detector.currentState().attemptCounts
+    XCTAssertEqual(counts.count, 3)
+    XCTAssertNil(counts["guid-a"])
+    XCTAssertEqual(counts["guid-b"], 1)
+    XCTAssertEqual(counts["guid-c"], 1)
+    XCTAssertEqual(counts["guid-d"], 1)
+  }
+
   func testStateStoreLoadsLegacyJSONWithoutNewFields() throws {
     let directory = try makeTemporaryDirectory()
     defer {

@@ -93,20 +93,28 @@ public enum RetractionDetectorError: Error, LocalizedError {
 
 public final class RetractionDetector {
   public static let defaultMaxAttempts = 3
+  public static let defaultMaxProcessedGUIDs = 5_000
+  public static let defaultMaxAttemptCounts = 1_000
 
   private let chatDBURL: URL
   private let stateStore: DetectorStateStore
   private let maxAttempts: Int
+  private let maxProcessedGUIDs: Int
+  private let maxAttemptCounts: Int
   private var state: DetectorState
 
   public init(
     chatDBURL: URL = defaultMessagesChatDBURL(),
     stateStore: DetectorStateStore = DetectorStateStore(),
-    maxAttempts: Int = RetractionDetector.defaultMaxAttempts
+    maxAttempts: Int = RetractionDetector.defaultMaxAttempts,
+    maxProcessedGUIDs: Int = RetractionDetector.defaultMaxProcessedGUIDs,
+    maxAttemptCounts: Int = RetractionDetector.defaultMaxAttemptCounts
   ) throws {
     self.chatDBURL = chatDBURL
     self.stateStore = stateStore
     self.maxAttempts = maxAttempts
+    self.maxProcessedGUIDs = maxProcessedGUIDs
+    self.maxAttemptCounts = maxAttemptCounts
     self.state = try stateStore.load()
   }
 
@@ -150,6 +158,7 @@ public final class RetractionDetector {
       changed = true
     }
     if changed {
+      pruneState()
       try stateStore.save(state)
     }
   }
@@ -165,11 +174,33 @@ public final class RetractionDetector {
     } else {
       state.attemptCounts[guid] = nextCount
     }
+    pruneState()
     try stateStore.save(state)
   }
 
   public func currentState() -> DetectorState {
     state
+  }
+
+  // Bounded growth: drop the lexicographically smallest GUIDs once we exceed
+  // the cap. processedGUIDs is kept sorted, so this is a deterministic,
+  // stable-across-restarts O(1) drop. The high-water-mark
+  // `lastSeenDateEdited` is the primary dedup; processedGUIDs is a backstop
+  // for retractions that share the same date_edited boundary, so eviction
+  // here can only reawaken retractions whose timestamp matches the boundary
+  // exactly — extremely rare in practice and harmless if it happens.
+  private func pruneState() {
+    if state.processedGUIDs.count > maxProcessedGUIDs {
+      let excess = state.processedGUIDs.count - maxProcessedGUIDs
+      state.processedGUIDs.removeFirst(excess)
+    }
+    if state.attemptCounts.count > maxAttemptCounts {
+      let excess = state.attemptCounts.count - maxAttemptCounts
+      let dropKeys = state.attemptCounts.keys.sorted().prefix(excess)
+      for key in dropKeys {
+        state.attemptCounts.removeValue(forKey: key)
+      }
+    }
   }
 
   private func queryRetractions(database: OpaquePointer, after lastSeenDateEdited: Int64) throws -> [RetractionDetected] {
