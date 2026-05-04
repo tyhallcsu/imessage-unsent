@@ -1,0 +1,165 @@
+import Foundation
+import XCTest
+@testable import IMUCore
+
+final class WALSnapshotterTests: XCTestCase {
+  private var workDir: URL!
+  private var walURL: URL!
+  private var storeDir: URL!
+
+  override func setUpWithError() throws {
+    workDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("imu-walsnap-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+    walURL = workDir.appendingPathComponent("chat.db-wal", isDirectory: false)
+    storeDir = workDir.appendingPathComponent("wal-history", isDirectory: true)
+  }
+
+  override func tearDown() {
+    if let workDir {
+      try? FileManager.default.removeItem(at: workDir)
+    }
+    workDir = nil
+    walURL = nil
+    storeDir = nil
+  }
+
+  func testSnapshotCreatesFileNamedAfterTimestampAndSize() throws {
+    try writeWAL(bytes: 1024)
+    let clock = StubClock(start: Date(timeIntervalSince1970: 1_800_000_000))
+    let snapper = WALSnapshotter(walURL: walURL, storeDir: storeDir, clock: clock.now)
+
+    let dest = try XCTUnwrap(try snapper.snapshot())
+
+    XCTAssertEqual(snapper.snapshotCount(), 1)
+    XCTAssertTrue(dest.lastPathComponent.contains("-1024.db-wal"),
+                  "filename should encode the WAL size: \(dest.lastPathComponent)")
+    let bytes = try Data(contentsOf: dest)
+    XCTAssertEqual(bytes.count, 1024)
+  }
+
+  func testSnapshotIsNoOpWhenWALSizeUnchanged() throws {
+    try writeWAL(bytes: 1024)
+    let clock = StubClock(start: Date(timeIntervalSince1970: 1_800_000_000))
+    let snapper = WALSnapshotter(walURL: walURL, storeDir: storeDir, clock: clock.now)
+
+    _ = try snapper.snapshot()
+    clock.advance(by: 1)
+    let second = try snapper.snapshot()
+
+    XCTAssertNil(second, "second snapshot at same WAL size must be a no-op")
+    XCTAssertEqual(snapper.snapshotCount(), 1)
+  }
+
+  func testSnapshotCapturesNewSnapshotWhenWALSizeChanges() throws {
+    try writeWAL(bytes: 1024)
+    let clock = StubClock(start: Date(timeIntervalSince1970: 1_800_000_000))
+    let snapper = WALSnapshotter(walURL: walURL, storeDir: storeDir, clock: clock.now)
+
+    _ = try snapper.snapshot()
+    try writeWAL(bytes: 2048)
+    clock.advance(by: 1)
+    let second = try snapper.snapshot()
+
+    XCTAssertNotNil(second)
+    XCTAssertEqual(snapper.snapshotCount(), 2)
+  }
+
+  func testRetentionLimitTrimsOldestSnapshots() throws {
+    let clock = StubClock(start: Date(timeIntervalSince1970: 1_800_000_000))
+    let snapper = WALSnapshotter(
+      walURL: walURL,
+      storeDir: storeDir,
+      retentionLimit: 2,
+      clock: clock.now
+    )
+
+    for size in [1024, 2048, 3072, 4096, 5120] {
+      try writeWAL(bytes: size)
+      clock.advance(by: 1)
+      _ = try snapper.snapshot()
+    }
+
+    XCTAssertEqual(snapper.snapshotCount(), 2,
+                   "retentionLimit=2 must keep only the two most recent snapshots")
+    let names = (try FileManager.default.contentsOfDirectory(at: storeDir, includingPropertiesForKeys: nil))
+      .map(\.lastPathComponent)
+      .sorted()
+    XCTAssertTrue(names.contains(where: { $0.contains("-4096.db-wal") }))
+    XCTAssertTrue(names.contains(where: { $0.contains("-5120.db-wal") }))
+  }
+
+  func testMaxAgeDropsStaleSnapshots() throws {
+    let clock = StubClock(start: Date(timeIntervalSince1970: 1_800_000_000))
+    let snapper = WALSnapshotter(
+      walURL: walURL,
+      storeDir: storeDir,
+      retentionLimit: 100,
+      maxAge: 60,
+      clock: clock.now
+    )
+
+    try writeWAL(bytes: 1024)
+    let oldSnap = try XCTUnwrap(try snapper.snapshot())
+    // Force the oldest snapshot's mtime to a value older than maxAge.
+    try FileManager.default.setAttributes(
+      [.modificationDate: clock.now().addingTimeInterval(-300)],
+      ofItemAtPath: oldSnap.path
+    )
+    try writeWAL(bytes: 2048)
+    clock.advance(by: 1)
+    _ = try snapper.snapshot()
+
+    XCTAssertEqual(snapper.snapshotCount(), 1,
+                   "snapshot older than maxAge must be trimmed during the next snapshot")
+  }
+
+  func testArchiveToCopiesAllSnapshots() throws {
+    let clock = StubClock(start: Date(timeIntervalSince1970: 1_800_000_000))
+    let snapper = WALSnapshotter(walURL: walURL, storeDir: storeDir, clock: clock.now)
+
+    for size in [1024, 2048, 3072] {
+      try writeWAL(bytes: size)
+      clock.advance(by: 1)
+      _ = try snapper.snapshot()
+    }
+    let dest = workDir.appendingPathComponent("archive-out", isDirectory: true)
+
+    try snapper.archiveTo(dest)
+
+    let copied = try FileManager.default.contentsOfDirectory(at: dest, includingPropertiesForKeys: nil)
+      .filter { $0.lastPathComponent.hasSuffix(".db-wal") }
+    XCTAssertEqual(copied.count, 3)
+  }
+
+  func testSnapshotIsNoOpWhenWALMissing() throws {
+    XCTAssertFalse(FileManager.default.fileExists(atPath: walURL.path))
+    let snapper = WALSnapshotter(walURL: walURL, storeDir: storeDir)
+
+    let result = try snapper.snapshot()
+
+    XCTAssertNil(result)
+    XCTAssertEqual(snapper.snapshotCount(), 0)
+  }
+
+  // MARK: - Helpers
+
+  private func writeWAL(bytes: Int) throws {
+    let data = Data(repeating: 0xAB, count: bytes)
+    try data.write(to: walURL, options: .atomic)
+  }
+}
+
+private final class StubClock {
+  private var current: Date
+
+  init(start: Date) {
+    current = start
+  }
+
+  func now() -> Date { current }
+
+  func advance(by seconds: TimeInterval) {
+    current = current.addingTimeInterval(seconds)
+  }
+}

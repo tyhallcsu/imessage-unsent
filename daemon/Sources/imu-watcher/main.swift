@@ -9,6 +9,7 @@ final class WatcherDaemon {
   private var heartbeatTimer: DispatchSourceTimer?
   private var signalSources: [DispatchSourceSignal] = []
   private var walWatcher: FSWatcher?
+  private var walSnapshotter: WALSnapshotter?
   private var detector: RetractionDetector?
   private var archivePipeline: ArchivePipeline?
   private var notifier: RecoveryNotifier?
@@ -28,6 +29,9 @@ final class WatcherDaemon {
       retentionLimit: config.archiveRetention
     )
     notifier = RecoveryNotifier(config: config.notifications)
+    walSnapshotter = WALSnapshotter(
+      storeDir: dataDir.appendingPathComponent("wal-history", isDirectory: true)
+    )
 
     statusBoard.recordStart()
     let server = ControlServer(
@@ -107,6 +111,16 @@ final class WatcherDaemon {
   }
 
   private func handleWalChange(size: Int64) {
+    // Snapshot the WAL into the rolling buffer FIRST, before any SQL work
+    // that might race against iMessage's auto-checkpoint (#67). The buffer
+    // is what the recovery script falls back to when the live WAL no longer
+    // contains the pre-retract page image.
+    do {
+      _ = try walSnapshotter?.snapshot()
+    } catch {
+      log("wal snapshot error=\(error.localizedDescription)")
+    }
+
     let delta = size - lastWalSize
     lastWalSize = size
     let deltaText = delta >= 0 ? "+\(delta)" : "\(delta)"
@@ -130,6 +144,17 @@ final class WatcherDaemon {
             continue
           }
           let complete = try archivePipeline.archive(event: event)
+          // Copy the rolling WAL buffer into the archive's wal-history/ so
+          // the recovery script can scan older WAL frames too (#67).
+          let walHistoryDest = complete.archiveDir.appendingPathComponent(
+            "wal-history",
+            isDirectory: true
+          )
+          do {
+            try walSnapshotter?.archiveTo(walHistoryDest)
+          } catch {
+            log("wal-history archive error=\(error.localizedDescription)")
+          }
           log("recovery complete archive_dir=\(complete.archiveDir.path) recovered=\(complete.recovered)")
           do {
             if complete.recovered {
@@ -164,6 +189,7 @@ final class WatcherDaemon {
     heartbeatTimer?.cancel()
     walWatcher?.stop()
     walWatcher = nil
+    walSnapshotter = nil
     detector = nil
     archivePipeline = nil
     notifier = nil

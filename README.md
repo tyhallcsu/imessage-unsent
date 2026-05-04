@@ -256,6 +256,28 @@ grep -RIn "$GUID" export/
 
 </details>
 
+## Limitations — what this tool *cannot* recover
+
+Recovery is best-effort and inherently racy. SQLite WAL is a **rolling buffer**, not an audit log: once iMessage commits a write and SQLite checkpoints the WAL into `chat.db`, the original page image is gone. The recovery vectors above each work some fraction of the time, and the daemon improves the odds, but **none of them is a guarantee**.
+
+The cases this tool will reliably miss:
+
+- **Long messages and slow unsends.** The longer the gap between sending a message and unsending it, the higher the chance an intervening WAL checkpoint occurs. Composing a long message takes longer; SQLite's `wal_autocheckpoint` (default ≈ 4 MB) can fire during that window. By the time you tap "Undo Send" the original page may already be in `chat.db` — and the unsend itself overwrites it. A short "Test" message unsent in 5 seconds is the easy case; a paragraph unsent after a minute often isn't.
+- **Recovery started after iMessage restarts.** Messages composed in the previous session are not in the live WAL anymore — they're in `chat.db`, mid-unsend, with the original text already gone. External backups (Vector 6) are your only path.
+- **Empty `attributedBody` after retraction.** iMessage clears both `text` and `attributedBody` on retract. If the WAL no longer contains the pre-retract page, the attributedBody vector fails too.
+- **Group chats where another member retracts.** The retract event may not flush new attributedBody / text bytes to the WAL on your device at all if the message was already considered delivered; the row update is small.
+- **Attachments.** This tool recovers text only. Image / file unsends are out of scope.
+
+The daemon mitigates the WAL-checkpoint race by maintaining a **rolling snapshot buffer** at `~/Library/Application Support/imessage-unsent/wal-history/` — every change to `chat.db-wal` is copied into the buffer (capped at 30 snapshots / 5 minutes by default), so the recovery script can also scan WAL frames that the live file no longer contains. This dramatically improves the recovery rate for slow-unsend cases but cannot help if the daemon wasn't running, didn't have Full Disk Access, or wasn't installed at the time the message was originally written.
+
+If recovery comes back empty, your fastest manual fallback is **Vector 6 → APFS local snapshots**:
+
+```bash
+tmutil listlocalsnapshots /
+sudo mount_apfs -o nobrowse,rdonly -s com.apple.TimeMachine.<snap>.local / /tmp/imu-snap
+ls /tmp/imu-snap/Users/<you>/Library/Messages/chat.db  # an older copy
+```
+
 ## Recovery workflow
 
 <img src="./assets/recovery-flow.svg" alt="Five-step imessage-unsent workflow from snapshot to WAL recovery and cross-check" width="100%">

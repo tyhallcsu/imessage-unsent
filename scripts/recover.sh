@@ -509,8 +509,8 @@ else
   imu_extract_from_wal_json "$WAL" "$GUID" > "$WAL_JSON"
   : > "$WORK/wal-hits.txt"
   if [[ -z "$WAL_RESULTS" ]]; then
-    log "  No pre-retract text found following any GUID occurrence."
-    printf "No pre-retract text found following any GUID occurrence.\n" > "$WORK/wal-hits.txt"
+    log "  No pre-retract text found in live chat.db-wal."
+    printf "No pre-retract text found in live chat.db-wal.\n" > "$WORK/wal-hits.txt"
     FAILURE_CATEGORY="wal_checkpointed"
   else
     while IFS=$'\t' read -r off len text; do
@@ -519,6 +519,39 @@ else
       log "  $line"
       printf "%s\n" "$line" >> "$WORK/wal-hits.txt"
     done <<< "$WAL_RESULTS"
+  fi
+
+  # Also scan the rolling WAL history buffer (#67). The daemon snapshots
+  # chat.db-wal on every change, so older WAL frames that SQLite has since
+  # checkpointed away may still survive in `wal-history/`. This is the
+  # difference-maker for long messages where the live WAL has already been
+  # rewritten by the time the recovery runs.
+  WAL_HISTORY_DIR="$WORK/wal-history"
+  if [[ -d "$WAL_HISTORY_DIR" ]]; then
+    hist_count=0
+    while IFS= read -r -d '' HIST; do
+      [[ -f "$HIST" ]] || continue
+      hist_count=$((hist_count + 1))
+      HIST_RESULTS=$(imu_extract_from_wal "$HIST" "$GUID" 2>/dev/null || true)
+      if [[ -n "$HIST_RESULTS" ]]; then
+        while IFS=$'\t' read -r off len text; do
+          text_repr=$(python3 -c 'import sys; print(repr(sys.argv[1]))' "$text")
+          line="WAL_HISTORY $(basename "$HIST")  OFFSET $off  LEN $len  TEXT: $text_repr"
+          log "  $line"
+          printf "%s\n" "$line" >> "$WORK/wal-hits.txt"
+        done <<< "$HIST_RESULTS"
+      fi
+    done < <(find "$WAL_HISTORY_DIR" -maxdepth 1 -name '*.db-wal' -print0 2>/dev/null)
+    log "  wal-history scan: $hist_count snapshot(s)"
+
+    # Merge candidates from every source into wal-candidates.json so the
+    # downstream JSON-report builder sees them all.
+    lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)"
+    python3 "$lib_dir/wal_merge_candidates.py" \
+      --guid "$GUID" \
+      --live "$WAL" \
+      --history-dir "$WAL_HISTORY_DIR" \
+      > "$WAL_JSON"
   fi
 fi
 hr

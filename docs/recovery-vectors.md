@@ -229,9 +229,33 @@ When `--json` is set, [`scripts/lib/json_report.py`](../scripts/lib/json_report.
 
 ---
 
+## Limitations — when each vector fails
+
+Each vector has a failure mode. When all of them fail it's almost always for the same underlying reason: **SQLite WAL is a rolling buffer, not an audit log.** Once iMessage commits and SQLite checkpoints the WAL into `chat.db`, the original page image is overwritten — the unsent text is no longer on disk anywhere outside external backups (Vector 6).
+
+| Vector | Fails reliably when |
+|---|---|
+| 0 — snapshot | The daemon wasn't running, didn't have Full Disk Access, or the WAL was already checkpointed before the snapshot fired. |
+| 1 — locate row | The handle never resolved (Apple ID typo, account merge), or the row was hard-deleted by a later sync. Rare. |
+| 2 — `message_summary_info` | iMessage builds vary on whether they retain the original text in `msi`. Newer macOS often returns "metadata only" — the plist is present but the `text` field is missing. **Cannot be relied on.** |
+| 3 — `attributedBody` typedstream | Retraction clears `attributedBody` to a 0-byte blob. This vector only works if the WAL still has a frame containing the pre-retract value (issue #67) — i.e. if the unsend was very recent. |
+| 4 — `chat.db-wal` byte forensics | The pre-retract page is no longer in the WAL. Long messages and slow unsends are the dominant cause: more time → higher chance of an intervening checkpoint. The rolling snapshot buffer at `~/Library/Application Support/imessage-unsent/wal-history/` mitigates but does not eliminate this. |
+| 5 — `imessage-exporter` cross-check | Same root cause as Vector 4 — operates on the same `chat.db` post-retract. Useful as a sanity check, not as a primary vector. |
+| 6 — external backups | No backup exists for the relevant time window, or the iTunes/Finder backup is encrypted (this tool cannot decrypt). Time Machine and APFS local snapshots are the most reliable subset when configured. |
+
+### Practical guidance to maximize recovery rate
+
+1. **Install the daemon and grant Full Disk Access before you ever need it.** The daemon's rolling WAL snapshot buffer (issue #67) is the single biggest win. Without it, recovery is best-effort against whatever the live WAL happens to look like at the moment you query it.
+2. **Run the recovery as soon as possible after the unsend.** Each subsequent iMessage write moves more frames into the WAL and increases the chance of `wal_autocheckpoint` (≈ 4 MB) firing.
+3. **Don't restart Messages or sign out of iCloud after an unsend you want to recover.** Restarts often trigger a synchronous checkpoint of the WAL.
+4. **Enable Time Machine.** A daily backup catches anything Vectors 0–5 miss.
+5. **For audit-grade recovery, replay messages off an iPhone backup** (Vector 6) — the iPhone's `sms.db` updates on its own schedule and may have the original text long after the Mac's `chat.db` has retracted it.
+
+The tool intentionally does not promise reliability. It's a forensics tool: it will recover the message *when it can*, write a clean failure record when it can't, and never lie about the difference.
+
 ## Cross-references
 
 - Conceptual overview of all six vectors: [README — The six recovery vectors](../README.md#the-six-recovery-vectors)
 - Why Vector 4 works at the byte level: [README — Why the WAL vector works (byte-level)](../README.md#why-the-wal-vector-works-byte-level)
 - The Notify-only invariant and how it's enforced across all vectors: [SECURITY.md — Operating mode](../SECURITY.md#operating-mode--notify-only)
-- The daemon that automates Vectors 0–4: [daemon/Sources/IMUCore/](../daemon/Sources/IMUCore/) (in particular [`FSWatcher.swift`](../daemon/Sources/IMUCore/FSWatcher.swift), [`RetractionDetector.swift`](../daemon/Sources/IMUCore/RetractionDetector.swift), [`ArchivePipeline.swift`](../daemon/Sources/IMUCore/ArchivePipeline.swift))
+- The daemon that automates Vectors 0–4: [daemon/Sources/IMUCore/](../daemon/Sources/IMUCore/) (in particular [`FSWatcher.swift`](../daemon/Sources/IMUCore/FSWatcher.swift), [`RetractionDetector.swift`](../daemon/Sources/IMUCore/RetractionDetector.swift), [`ArchivePipeline.swift`](../daemon/Sources/IMUCore/ArchivePipeline.swift), [`WALSnapshotter.swift`](../daemon/Sources/IMUCore/WALSnapshotter.swift))
