@@ -112,12 +112,18 @@ jobs:
       - name: Verify README internal links resolve
         run: |
           # crude check: every [..](path) where path starts with ./ or no scheme should exist
+          # Strips URL fragments (#section) and query strings (?key=val) before
+          # the file existence check so deep links like foo.md#section pass.
           fail=0
           while IFS= read -r line; do
             target="${line#*](}"; target="${target%%)*}"
             case "$target" in
               http*|\#*|mailto:*) continue ;;
-              *) [ -e "$target" ] || { echo "Broken link: $target"; fail=1; } ;;
+              *)
+                file="${target%%#*}"
+                file="${file%%\?*}"
+                [ -e "$file" ] || { echo "Broken link: $target (file: $file)"; fail=1; }
+                ;;
             esac
           done < <(grep -oE '\]\([^)]+\)' README.md)
           exit "$fail"
