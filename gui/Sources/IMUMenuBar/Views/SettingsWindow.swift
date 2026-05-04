@@ -280,26 +280,59 @@ struct SettingsWindow: View {
 
   @ViewBuilder
   private var permissionRow: some View {
-    HStack {
-      Text("macOS notification permission")
-      Spacer()
-      Text(permissionModel.statusText)
-        .foregroundStyle(.secondary)
-        .monospacedDigit()
-      switch permissionModel.status {
-      case .notDetermined:
-        Button("Enable notifications") {
-          Task { await permissionModel.enable() }
+    VStack(alignment: .leading, spacing: 4) {
+      HStack {
+        Text("macOS notification permission")
+        Spacer()
+        Text(permissionModel.statusText)
+          .foregroundStyle(.secondary)
+          .monospacedDigit()
+        if permissionModel.isRequesting {
+          ProgressView().controlSize(.small)
+          Text("Requesting…")
+            .foregroundStyle(.secondary)
+            .font(.caption)
+        } else if permissionModel.promptSuppressed || permissionModel.status == .denied {
+          Button("Open System Settings") {
+            NSWorkspace.shared.open(NotificationPermissionModel.systemSettingsURL)
+          }
+          .help("macOS won't show the permission prompt again. Allow imessage-unsent in System Settings → Notifications.")
+        } else {
+          switch permissionModel.status {
+          case .notDetermined:
+            Button("Enable notifications") {
+              Task { await permissionModel.enable() }
+            }
+          case .authorized, .provisional:
+            HStack(spacing: 6) {
+              Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+              Button("Send test") {
+                permissionModel.sendTestNotification()
+              }
+              .help("Posts a benign banner so you can confirm notifications reach the user.")
+            }
+          default:
+            EmptyView()
+          }
         }
-      case .denied:
-        Button("Open System Settings") {
-          NSWorkspace.shared.open(NotificationPermissionModel.systemSettingsURL)
+      }
+      if permissionModel.promptSuppressed {
+        Text("macOS suppressed the prompt — likely because notifications were declined previously. Open System Settings to allow.")
+          .font(.caption)
+          .foregroundStyle(.orange)
+      }
+      if let result = permissionModel.lastTestResult {
+        switch result {
+        case .sent:
+          Label("Test notification sent", systemImage: "checkmark.circle.fill")
+            .font(.caption)
+            .foregroundStyle(.green)
+        case let .failed(message):
+          Label(message, systemImage: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(.red)
         }
-      case .authorized, .provisional:
-        Image(systemName: "checkmark.circle.fill")
-          .foregroundStyle(.green)
-      default:
-        EmptyView()
       }
     }
   }
