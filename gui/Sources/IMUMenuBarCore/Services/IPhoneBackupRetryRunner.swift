@@ -1,9 +1,12 @@
 import Foundation
 
 public enum IPhoneBackupRetryResult: Equatable {
-  /// `recover.sh --include-iphone-backup` exited 0. Reload recovery.json
-  /// from the archive directory to see whether it actually hit.
-  case success(exitCode: Int32, durationMs: Int)
+  /// `recover.sh --include-iphone-backup` exited 0 and `recovery.json`
+  /// now contains recovered text.
+  case found(detail: RecoveryDetail, durationMs: Int)
+  /// `recover.sh --include-iphone-backup` exited 0, but `recovery.json`
+  /// still does not contain recovered text.
+  case noMatch(detail: RecoveryDetail, durationMs: Int)
   /// `recover.sh` exited non-zero, the binary couldn't be launched, or the
   /// run timed out. The message is operator-facing.
   case failure(message: String)
@@ -22,7 +25,7 @@ public struct IPhoneBackupRetryRunner: IPhoneBackupRetryRunning {
   public let timeoutSeconds: Int
 
   public init(
-    recoverScriptURL: URL = HealthCheckPaths.standard().recoveryScript,
+    recoverScriptURL: URL = HealthCheckPaths.defaults().recoveryScript,
     timeoutSeconds: Int = 60
   ) {
     self.recoverScriptURL = recoverScriptURL
@@ -56,7 +59,7 @@ private func runProcess(
   timeoutSeconds: Int
 ) -> IPhoneBackupRetryResult {
   guard FileManager.default.isExecutableFile(atPath: recoverScriptURL.path) else {
-    return .failure(message: "recover.sh not found or not executable at \(recoverScriptURL.path)")
+    return .failure(message: "recover.sh not found or not executable")
   }
 
   let process = Process()
@@ -77,7 +80,8 @@ private func runProcess(
   do {
     try process.run()
   } catch {
-    return .failure(message: "failed to launch recover.sh: \(error.localizedDescription)")
+    return .failure(message: shortMessage("Could not launch recover.sh: \(error.localizedDescription)",
+                                         fallback: "Could not launch recover.sh"))
   }
 
   let timeoutDeadline = Date().addingTimeInterval(TimeInterval(timeoutSeconds))
@@ -92,15 +96,51 @@ private func runProcess(
   process.waitUntilExit()
 
   let durationMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+  let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
+  let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
   let exitCode = process.terminationStatus
   if exitCode == 0 {
-    return .success(exitCode: exitCode, durationMs: durationMs)
+    do {
+      let detail = try FileSystemRecoveryDetailLoader().load(archiveDir: archiveDir)
+      if detail.recovered {
+        return .found(detail: detail, durationMs: durationMs)
+      }
+      return .noMatch(detail: detail, durationMs: durationMs)
+    } catch {
+      return .failure(message: "Retry finished, but recovery results could not be reloaded")
+    }
   }
-  let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
-  let trimmed = String(data: stderrData, encoding: .utf8)?
-    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-  let summary = trimmed.isEmpty
-    ? "recover.sh exited \(exitCode)"
-    : trimmed.split(separator: "\n").last.map(String.init) ?? trimmed
-  return .failure(message: summary)
+  return .failure(message: shortProcessMessage(
+    stdoutData: stdoutData,
+    stderrData: stderrData,
+    exitCode: exitCode
+  ))
+}
+
+private func shortProcessMessage(
+  stdoutData: Data,
+  stderrData: Data,
+  exitCode: Int32
+) -> String {
+  let stderrText = String(data: stderrData, encoding: .utf8) ?? ""
+  let stdoutText = String(data: stdoutData, encoding: .utf8) ?? ""
+  let candidate = lastNonEmptyLine(in: stderrText)
+    ?? lastNonEmptyLine(in: stdoutText)
+    ?? ""
+  return shortMessage(candidate, fallback: "recover.sh exited \(exitCode)")
+}
+
+private func lastNonEmptyLine(in text: String) -> String? {
+  text
+    .split(separator: "\n")
+    .map(String.init)
+    .reversed()
+    .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+}
+
+private func shortMessage(_ raw: String, fallback: String) -> String {
+  let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+  guard !trimmed.isEmpty else { return fallback }
+  if trimmed.count <= 160 { return trimmed }
+  return String(trimmed.prefix(157)) + "..."
 }
