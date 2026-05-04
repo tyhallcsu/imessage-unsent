@@ -17,7 +17,7 @@ struct MenuBarContentView: View {
       } else {
         ForEach(model.recentRecoveries.prefix(5)) { recovery in
           Button {
-            NSWorkspace.shared.open(recovery.archiveURL)
+            openAppURL("imu://history")
           } label: {
             VStack(alignment: .leading) {
               Text(recovery.title)
@@ -26,6 +26,11 @@ struct MenuBarContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+            }
+          }
+          .contextMenu {
+            Button("Reveal in Finder") {
+              NSWorkspace.shared.open(recovery.archiveURL)
             }
           }
         }
