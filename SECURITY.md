@@ -43,6 +43,45 @@ The watcher daemon serves a Unix-domain socket at `~/Library/Application Support
 - The `recent` response carries the **recovered plaintext** of unsent messages — the same data already on disk under `~/Library/Application Support/imessage-unsent/archives/<dir>/recovery.json`. Any process running as your user could read that archive directly; the socket does not widen the blast radius. If you do not want plaintext available to other processes running as your user, do not run the daemon.
 - No authentication token is required. Same-user trust on the local machine is the only boundary. If we ever cross user boundaries (e.g., a system-wide LaunchDaemon) this needs to change.
 
+## Webhook delivery security
+
+When `[notifications].webhook` and `[notifications].webhook_signing_secret` are both set in `~/.config/imessage-unsent/config.toml`, each successful recovery causes the daemon to POST a JSON body to the configured URL. The implementation lives in [`daemon/Sources/IMUCore/RecoveryNotifier.swift`](daemon/Sources/IMUCore/RecoveryNotifier.swift) (`WebhookDelivery`).
+
+**Signing**
+
+- **Header**: `X-Imu-Signature`
+- **Algorithm**: HMAC-SHA256 (Apple `CryptoKit`)
+- **Key**: UTF-8 bytes of `notifications.webhook_signing_secret`
+- **Bytes signed**: the exact `Content-Type: application/json` POST body, byte-for-byte
+- **Encoding**: lowercase hex (no `sha256=` prefix, no base64)
+- **When omitted**: if the signing secret is empty, the header is not sent. Verify on the receiving side that the header is present *and* valid; reject the delivery otherwise.
+- **No replay protection.** There is no timestamp header and no nonce. If you need replay resistance, terminate the webhook on a private network or front it with a service that adds those guarantees.
+
+**Retries**
+
+A non-2xx response or transport error triggers up to 3 retries with exponential backoff (0.5s, 1.0s, 2.0s). Each retry sends the same body with the same signature. Idempotency on the receiving side is your responsibility.
+
+**Verification — pseudocode (Python)**
+
+```python
+import hmac, hashlib
+
+def verify(body: bytes, header_value: str, secret: str) -> bool:
+    expected = hmac.new(
+        secret.encode("utf-8"),
+        body,
+        hashlib.sha256,
+    ).hexdigest()
+    # Constant-time comparison — never use ==.
+    return hmac.compare_digest(expected, header_value or "")
+```
+
+**Operational guidance**
+
+- Generate the signing secret with at least 256 bits of entropy (e.g. `openssl rand -hex 32`). Treat it like a password — don't commit it, don't log it.
+- Rotate by setting a new value in `config.toml` and restarting the daemon (e.g. via the GUI's Settings → Daemon → "Restart imu-watcher" button, or `make daemon-install`). There is no overlap window — the daemon signs every delivery with the currently configured secret.
+- The webhook body contains the recovered message text (base64-encoded under `recovered.text_b64`). Anyone who can read the receiving endpoint's logs can read the recovered text. Lock that down accordingly.
+
 ## Data hygiene
 
 The repository's `.gitignore` excludes:
