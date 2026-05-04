@@ -144,6 +144,10 @@ public final class SystemNotificationAuthorizationProbe: NotificationAuthorizati
   public init() {}
 
   public func getAuthorizationStatus(completion: @escaping (UNAuthorizationStatus) -> Void) {
+    guard Bundle.main.bundleIdentifier != nil else {
+      completion(.notDetermined)
+      return
+    }
     UNUserNotificationCenter.current().getNotificationSettings { settings in
       completion(settings.authorizationStatus)
     }
