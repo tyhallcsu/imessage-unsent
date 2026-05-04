@@ -7,6 +7,23 @@ final class URLSchemeRouterTests: XCTestCase {
     XCTAssertEqual(routeIMUURL(URL(string: "imu://history")!), .history)
   }
 
+  func testHistoryHostWithTrailingSlashRoutesToHistory() {
+    XCTAssertEqual(routeIMUURL(URL(string: "imu://history/")!), .history)
+  }
+
+  func testHistoryWithArchiveIdRoutesToHistoryEntry() {
+    let id = "2026-05-04T191130Z-397888"
+    XCTAssertEqual(
+      routeIMUURL(URL(string: "imu://history/\(id)")!),
+      .historyEntry(id)
+    )
+  }
+
+  func testHistoryWithMalformedArchiveIdFallsBackToHistory() {
+    // Path doesn't match the canonical YYYY-MM-DDTHHMMSSZ-rowid pattern.
+    XCTAssertEqual(routeIMUURL(URL(string: "imu://history/not-a-real-archive-id")!), .history)
+  }
+
   func testSettingsHostRoutesToSettings() {
     XCTAssertEqual(routeIMUURL(URL(string: "imu://settings")!), .settings)
   }
