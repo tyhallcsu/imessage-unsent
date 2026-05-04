@@ -2,7 +2,7 @@
 # Sign and notarize release artifacts (daemon binary + GUI .app).
 #
 # Usage: scripts/sign-release.sh <gui-app-path> <daemon-binary-path>
-#   <gui-app-path>          path to IMUMenuBar.app
+#   <gui-app-path>          path to "iMessage Unsent.app"
 #   <daemon-binary-path>    path to imu-watcher binary
 #
 # Required env vars (when signing):
@@ -100,8 +100,8 @@ codesign --force --sign "$APPLE_DEVELOPER_ID_NAME" \
 
 log "Signing GUI app bundle $APP_PATH"
 # Sign nested binaries first (deepest first), then the bundle itself. The
-# IMUMenuBar.app today only nests its own MacOS executable, but if Resources/
-# ever picks up Helper Tools we'd want to enumerate them here.
+# .app today only nests its own MacOS executable, but if Resources/ ever
+# picks up Helper Tools we'd want to enumerate them here.
 codesign --force --sign "$APPLE_DEVELOPER_ID_NAME" \
   --options=runtime --timestamp \
   --entitlements "$ENTITLEMENTS" \
@@ -128,7 +128,7 @@ NOTARIZE_DIR="${RUNNER_TEMP:-/tmp}/imu-notarize"
 mkdir -p "$NOTARIZE_DIR"
 
 log "Zipping GUI .app for notarization submission"
-APP_ZIP="$NOTARIZE_DIR/IMUMenuBar-notarize.zip"
+APP_ZIP="$NOTARIZE_DIR/iMessage-Unsent-notarize.zip"
 ( cd "$(dirname "$APP_PATH")" && /usr/bin/ditto -c -k --keepParent "$(basename "$APP_PATH")" "$APP_ZIP" )
 
 log "Submitting GUI to notarytool (--wait)"

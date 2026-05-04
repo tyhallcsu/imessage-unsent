@@ -1,6 +1,6 @@
 # Code-signing and notarization
 
-This document explains how to sign and notarize the `imu-watcher` daemon and the `IMUMenuBar.app` GUI for a release. The signing pipeline is implemented by [`scripts/sign-release.sh`](../scripts/sign-release.sh) and called automatically from [`scripts/build-release.sh`](../scripts/build-release.sh) and the [`Release` workflow](../.github/workflows/release.yml).
+This document explains how to sign and notarize the `imu-watcher` daemon and the `iMessage Unsent.app` GUI (executable: `IMUMenuBar`) for a release. The signing pipeline is implemented by [`scripts/sign-release.sh`](../scripts/sign-release.sh) and called automatically from [`scripts/build-release.sh`](../scripts/build-release.sh) and the [`Release` workflow](../.github/workflows/release.yml).
 
 ## Status of this scaffold
 
@@ -18,7 +18,7 @@ Until the two operator actions are completed, every release run logs `Skipping c
 
 | Artifact | Codesign? | Notarize? | Staple? | Why |
 |---|---|---|---|---|
-| `IMUMenuBar.app` | yes | yes | yes | App bundles can be stapled; Gatekeeper checks the staple offline |
+| `iMessage Unsent.app` | yes | yes | yes | App bundles can be stapled; Gatekeeper checks the staple offline |
 | `imu-watcher` (daemon binary) | yes | no | no | `xcrun stapler` only works on `.app` / `.dmg` / `.pkg`; CLI Mach-O binaries take only the codesign + Hardened Runtime |
 
 Both are signed with `--options=runtime` (Hardened Runtime). The GUI is signed with the project entitlements file; the daemon is signed with the cert's default entitlements (no extra entitlements file).
@@ -106,10 +106,10 @@ codesign --verify --deep --strict --verbose=2 dist/imu-watcher-v0.4.0-arm64.tar.
 # (Or extract first; codesign needs the binary, not the tarball.)
 
 # GUI
-unzip -q dist/IMUMenuBar-v0.4.0.zip
-codesign --verify --deep --strict --verbose=2 IMUMenuBar.app
-spctl --assess --type execute --verbose=2 IMUMenuBar.app
-# Expected: "IMUMenuBar.app: accepted source=Notarized Developer ID"
+unzip -q dist/iMessage-Unsent-v0.4.0.zip
+codesign --verify --deep --strict --verbose=2 "iMessage Unsent.app"
+spctl --assess --type execute --verbose=2 "iMessage Unsent.app"
+# Expected: "iMessage Unsent.app: accepted source=Notarized Developer ID"
 ```
 
 If `spctl` reports `source=Developer ID` (without `Notarized`), the cert is right but notarization didn't run or didn't staple — check the Actions log for the `Submitting GUI to notarytool` step.

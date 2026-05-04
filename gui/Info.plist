@@ -7,9 +7,11 @@
   <key>CFBundleIconFile</key>
   <string>AppIcon</string>
   <key>CFBundleIdentifier</key>
-  <string>com.imessage-unsent.MenuBar</string>
+  <string>com.imessage-unsent.app</string>
   <key>CFBundleName</key>
-  <string>IMUMenuBar</string>
+  <string>iMessage Unsent</string>
+  <key>CFBundleDisplayName</key>
+  <string>iMessage Unsent</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>
@@ -19,12 +21,12 @@
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
   <key>NSContactsUsageDescription</key>
-  <string>imessage-unsent shows contact names and avatars for recovered messages by phone number. The lookup is read-only and never leaves your Mac.</string>
+  <string>iMessage Unsent shows contact names and avatars for recovered messages by phone number. The lookup is read-only and never leaves your Mac.</string>
   <key>CFBundleURLTypes</key>
   <array>
     <dict>
       <key>CFBundleURLName</key>
-      <string>com.imessage-unsent.MenuBar</string>
+      <string>com.imessage-unsent.app</string>
       <key>CFBundleURLSchemes</key>
       <array>
         <string>imu</string>

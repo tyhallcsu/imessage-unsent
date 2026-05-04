@@ -11,7 +11,7 @@ containing:
 
 - `imu-watcher-vX.Y.Z-arm64.tar.gz` — daemon binary + recovery scripts +
   LaunchAgent template
-- `IMUMenuBar-vX.Y.Z.zip` — menu bar app bundle
+- `iMessage-Unsent-vX.Y.Z.zip` — menu bar app bundle (extracts to `iMessage Unsent.app`)
 - `imessage-unsent-vX.Y.Z-source.tar.gz` — source archive (preserved for
   packagers and forks)
 - A `.sha256` companion next to each artifact
@@ -103,7 +103,7 @@ producing testable builds.
    GUI .app bundle (with `CFBundleShortVersionString` and `CFBundleVersion`
    set from the tag), regenerates `AppIcon.icns` from
    `assets/MacOS_AppIcon_iMessage_Unsent.png` via `scripts/build-app-icon.sh`
-   and stages it into `IMUMenuBar.app/Contents/Resources/` before signing,
+   and stages it into `iMessage Unsent.app/Contents/Resources/` before signing,
    and produces tarball + zip + sha256s.
 5. **`scripts/release-notes.sh`** generates Markdown notes from conventional
    commits since the previous tag.
