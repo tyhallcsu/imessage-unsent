@@ -8,11 +8,13 @@ struct SettingsWindow: View {
   @ObservedObject var settingsModel: SettingsModel
   @ObservedObject var permissionModel: NotificationPermissionModel
   @ObservedObject var restartModel: DaemonRestartModel
+  @StateObject private var contactsModel = ContactsPermissionModel()
 
   var body: some View {
     Form {
       daemonSection
       notificationsSection
+      contactsSection
       storageSection
       diagnosticsSection
       footerSection
@@ -21,6 +23,7 @@ struct SettingsWindow: View {
     .frame(minWidth: 520, minHeight: 540)
     .onAppear {
       model.refresh()
+      contactsModel.refresh()
     }
     .task {
       await permissionModel.refresh()
@@ -217,6 +220,70 @@ struct SettingsWindow: View {
           text: $settingsModel.draft.notifications.webhookSigningSecret
         )
         .textFieldStyle(.roundedBorder)
+      }
+    }
+  }
+
+  // MARK: Contacts
+
+  private var contactsSection: some View {
+    Section("Contacts") {
+      VStack(alignment: .leading, spacing: 4) {
+        HStack {
+          Text("Address Book access")
+          Spacer()
+          Text(contactsModel.statusText)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+          if contactsModel.isRequesting {
+            ProgressView().controlSize(.small)
+          } else if contactsModel.promptSuppressed || contactsModel.status == .denied {
+            Button("Open System Settings") {
+              NSWorkspace.shared.open(ContactsPermissionModel.systemSettingsURL)
+            }
+            .help("macOS won't show the prompt again. Allow iMessage Unsent under Privacy → Contacts.")
+          } else {
+            switch contactsModel.status {
+            case .notDetermined:
+              Button("Enable Contacts") {
+                Task { await contactsModel.enable() }
+              }
+            case .authorized:
+              HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                  .foregroundStyle(.green)
+                Button("Validate") { contactsModel.sampleLookup() }
+                  .help("Reads the first contact from your Address Book to confirm name resolution is working.")
+              }
+            default:
+              EmptyView()
+            }
+          }
+        }
+        if contactsModel.promptSuppressed {
+          Text("macOS suppressed the prompt — open System Settings → Privacy → Contacts to allow.")
+            .font(.caption)
+            .foregroundStyle(.orange)
+        }
+        if let result = contactsModel.lastTestResult {
+          switch result {
+          case let .sample(name, source):
+            Label("Resolved \(name) (\(source))", systemImage: "checkmark.circle.fill")
+              .font(.caption)
+              .foregroundStyle(.green)
+          case .empty:
+            Label("Address Book is empty — can't validate.", systemImage: "info.circle")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          case let .failed(message):
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+              .font(.caption)
+              .foregroundStyle(.red)
+          }
+        }
+        Text("Used to render display names + avatars on recovered messages. Read-only; no contact data leaves your Mac.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
     }
   }
