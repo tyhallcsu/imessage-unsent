@@ -64,6 +64,12 @@ public struct RecoveryNotificationBuilder {
   }
 
   private func failureReason(manifest: [String: Any], recovery: [String: Any]) -> String {
+    if let category = failureCategory(manifest: manifest, recovery: recovery) {
+      if let hint = category.actionableHint {
+        return "\(category.displayMessage) \(hint)"
+      }
+      return category.displayMessage
+    }
     if let error = recovery["error"] as? String, !error.isEmpty {
       return error
     }
@@ -74,7 +80,25 @@ public struct RecoveryNotificationBuilder {
     {
       return error
     }
-    return "Recovery did not find text; the WAL may already be checkpointed or the handle may be unknown."
+    return RecoveryFailureCategory.unknown.displayMessage
+  }
+
+  private func failureCategory(manifest: [String: Any], recovery: [String: Any]) -> RecoveryFailureCategory? {
+    if
+      let recovered = recovery["recovered"] as? [String: Any],
+      let raw = recovered["failure_category"] as? String,
+      let category = RecoveryFailureCategory(rawValue: raw)
+    {
+      return category
+    }
+    if
+      let recoveryManifest = manifest["recovery"] as? [String: Any],
+      let raw = recoveryManifest["failure_category"] as? String,
+      let category = RecoveryFailureCategory(rawValue: raw)
+    {
+      return category
+    }
+    return nil
   }
 
   private func archiveTargetURL(_ archiveDir: URL) -> URL {

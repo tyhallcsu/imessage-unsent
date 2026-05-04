@@ -42,6 +42,47 @@ final class RecoveryNotifierTests: XCTestCase {
     XCTAssertEqual(notification.body, "recover.sh exited 1")
   }
 
+  func testFailureNotificationBodyUsesCategoryDisplayMessageAndHintWhenCategoryPresent() throws {
+    let archive = try makeArchive(
+      handle: "+15550001000",
+      recoveredText: nil,
+      recoveryError: "recover.sh exited 1",
+      failureCategory: .walCheckpointed
+    )
+    defer {
+      try? FileManager.default.removeItem(at: archive)
+    }
+
+    let notification = RecoveryNotificationBuilder(
+      config: NotificationConfig(previewChars: 200)
+    ).build(for: RecoveryComplete(archiveDir: archive, recovered: false))
+
+    let category = RecoveryFailureCategory.walCheckpointed
+    XCTAssertEqual(
+      notification.body,
+      "\(category.displayMessage) \(category.actionableHint!)"
+    )
+    XCTAssertFalse(notification.body.contains("recover.sh exited 1"))
+  }
+
+  func testFailureNotificationBodyUsesDisplayMessageAloneWhenNoActionableHint() throws {
+    let archive = try makeArchive(
+      handle: "+15550001000",
+      recoveredText: nil,
+      recoveryError: nil,
+      failureCategory: .unknown
+    )
+    defer {
+      try? FileManager.default.removeItem(at: archive)
+    }
+
+    let notification = RecoveryNotificationBuilder(
+      config: NotificationConfig(previewChars: 200)
+    ).build(for: RecoveryComplete(archiveDir: archive, recovered: false))
+
+    XCTAssertEqual(notification.body, RecoveryFailureCategory.unknown.displayMessage)
+  }
+
   func testWebhookSignatureAndRequestHeaders() {
     let body = Data("hello".utf8)
     let request = WebhookDelivery.request(
@@ -126,25 +167,33 @@ final class RecoveryNotifierTests: XCTestCase {
     XCTAssertNotNil(postedRequests.first?.value(forHTTPHeaderField: "X-Imu-Signature"))
   }
 
-  private func makeArchive(handle: String, recoveredText: String?, recoveryError: String?) throws -> URL {
+  private func makeArchive(
+    handle: String,
+    recoveredText: String?,
+    recoveryError: String?,
+    failureCategory: RecoveryFailureCategory? = nil
+  ) throws -> URL {
     let archive = FileManager.default.temporaryDirectory
       .appendingPathComponent("imu-notifier-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
     let errorValue = recoveryError.map { $0 as Any } ?? NSNull()
     let textValue = recoveredText.map { Data($0.utf8).base64EncodedString() as Any } ?? NSNull()
 
+    var manifestRecovery: [String: Any] = ["error": errorValue]
+    if let failureCategory {
+      manifestRecovery["failure_category"] = failureCategory.rawValue
+    }
     let manifest: [String: Any] = [
       "handle": handle,
-      "recovery": [
-        "error": errorValue
-      ]
+      "recovery": manifestRecovery
     ]
     let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted])
     try manifestData.write(to: archive.appendingPathComponent("manifest.json", isDirectory: false))
 
-    let recovered: [String: Any] = [
-      "text_b64": textValue
-    ]
+    var recovered: [String: Any] = ["text_b64": textValue]
+    if let failureCategory {
+      recovered["failure_category"] = failureCategory.rawValue
+    }
     let recovery: [String: Any] = [
       "schema_version": 1,
       "recovered": recovered,

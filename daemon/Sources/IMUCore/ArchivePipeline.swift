@@ -153,7 +153,8 @@ public struct ArchivePipeline {
           finishedAt: isoString(Date()),
           exitCode: nil,
           recovered: false,
-          error: error.localizedDescription
+          error: error.localizedDescription,
+          failureCategory: .scriptError
         )
       )
     }
@@ -174,13 +175,15 @@ public struct ArchivePipeline {
     try? outputData.write(to: recoveryURL, options: .atomic)
 
     let recovered = recoveryJSONHasText(outputData)
+    let failureCategory = recovered ? nil : recoveryJSONFailureCategory(outputData)
     return RecoveryRun(
       manifest: ArchiveRecovery(
         startedAt: isoString(startedAt),
         finishedAt: isoString(Date()),
         exitCode: Int(process.terminationStatus),
         recovered: recovered,
-        error: process.terminationStatus == 0 ? nil : "recover.sh exited \(process.terminationStatus)"
+        error: process.terminationStatus == 0 ? nil : "recover.sh exited \(process.terminationStatus)",
+        failureCategory: failureCategory
       )
     )
   }
@@ -312,6 +315,7 @@ public struct ArchiveRecovery: Codable, Equatable {
   public let exitCode: Int?
   public let recovered: Bool
   public let error: String?
+  public let failureCategory: RecoveryFailureCategory?
 
   enum CodingKeys: String, CodingKey {
     case startedAt = "started_at"
@@ -319,6 +323,7 @@ public struct ArchiveRecovery: Codable, Equatable {
     case exitCode = "exit_code"
     case recovered
     case error
+    case failureCategory = "failure_category"
   }
 
   public init(
@@ -326,13 +331,15 @@ public struct ArchiveRecovery: Codable, Equatable {
     finishedAt: String,
     exitCode: Int?,
     recovered: Bool,
-    error: String?
+    error: String?,
+    failureCategory: RecoveryFailureCategory? = nil
   ) {
     self.startedAt = startedAt
     self.finishedAt = finishedAt
     self.exitCode = exitCode
     self.recovered = recovered
     self.error = error
+    self.failureCategory = failureCategory
   }
 }
 
@@ -349,6 +356,19 @@ private func recoveryJSONHasText(_ data: Data) -> Bool {
   return !text.isEmpty
 }
 
+func recoveryJSONFailureCategory(_ data: Data) -> RecoveryFailureCategory? {
+  guard
+    let object = try? JSONSerialization.jsonObject(with: data),
+    let payload = object as? [String: Any],
+    let recovered = payload["recovered"] as? [String: Any],
+    let raw = recovered["failure_category"] as? String
+  else {
+    return nil
+  }
+
+  return RecoveryFailureCategory(rawValue: raw) ?? .unknown
+}
+
 private func recoveryDiagnosticJSON(exitCode: Int?, error: String) -> Data {
   var payload: [String: Any] = [
     "schema_version": 1,
@@ -356,7 +376,8 @@ private func recoveryDiagnosticJSON(exitCode: Int?, error: String) -> Data {
       "text_b64": NSNull(),
       "length": NSNull(),
       "source": NSNull(),
-      "wal_offset": NSNull()
+      "wal_offset": NSNull(),
+      "failure_category": RecoveryFailureCategory.scriptError.rawValue
     ],
     "error": error
   ]
