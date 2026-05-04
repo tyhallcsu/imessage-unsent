@@ -78,16 +78,47 @@ struct RecoveryDetailView: View {
       }
     } else {
       VStack(alignment: .leading, spacing: 6) {
-        Text("Not recoverable")
+        Text(notRecoverableHeader)
           .font(.caption)
           .foregroundStyle(.secondary)
-        Text(detail?.recoveryError ?? entry.error ?? "(no text recovered)")
-          .textSelection(.enabled)
-          .foregroundStyle(.primary)
-          .padding(12)
-          .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.08)))
+        VStack(alignment: .leading, spacing: 8) {
+          Text(notRecoverableMessage)
+            .textSelection(.enabled)
+            .foregroundStyle(.primary)
+          if let hint = notRecoverableHint {
+            Text(hint)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .textSelection(.enabled)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.08)))
       }
     }
+  }
+
+  private var failureCategory: RecoveryFailureCategory? {
+    detail?.failureCategory ?? entry.failureCategory
+  }
+
+  private var notRecoverableHeader: String {
+    if let category = failureCategory {
+      return "Not recoverable — \(category.rawValue)"
+    }
+    return "Not recoverable"
+  }
+
+  private var notRecoverableMessage: String {
+    if let category = failureCategory {
+      return category.displayMessage
+    }
+    return detail?.recoveryError ?? entry.error ?? "(no text recovered)"
+  }
+
+  private var notRecoverableHint: String? {
+    failureCategory?.actionableHint
   }
 
   private var metadataBlock: some View {

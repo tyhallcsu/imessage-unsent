@@ -40,6 +40,8 @@ public struct FileSystemRecoveryDetailLoader: RecoveryDetailLoading {
     var recovered = manifest.recovery?.recovered ?? false
     var recoveredText: String?
     var recoveryError = manifest.recovery?.error
+    var failureCategory: RecoveryFailureCategory? = manifest.recovery?.failureCategory
+      .flatMap { RecoveryFailureCategory(rawValue: $0) ?? .unknown }
 
     let recoveryURL = archiveDir.appendingPathComponent("recovery.json", isDirectory: false)
     if let recoveryData = try? Data(contentsOf: recoveryURL),
@@ -54,6 +56,13 @@ public struct FileSystemRecoveryDetailLoader: RecoveryDetailLoading {
       if let payloadError = payload.error, !payloadError.isEmpty {
         recoveryError = payloadError
       }
+      if let raw = payload.recovered?.failureCategory {
+        failureCategory = RecoveryFailureCategory(rawValue: raw) ?? .unknown
+      }
+    }
+
+    if recovered {
+      failureCategory = nil
     }
 
     let snapshotFiles = manifest.snapFiles?
@@ -72,7 +81,8 @@ public struct FileSystemRecoveryDetailLoader: RecoveryDetailLoading {
       recoveredText: recoveredText,
       recoveryError: recoveryError,
       archivePath: archiveDir.path,
-      snapshotFiles: snapshotFiles
+      snapshotFiles: snapshotFiles,
+      failureCategory: failureCategory
     )
   }
 }
@@ -104,6 +114,13 @@ private struct SnapFileDTO: Decodable {
 private struct ManifestRecoveryDTO: Decodable {
   let recovered: Bool?
   let error: String?
+  let failureCategory: String?
+
+  enum CodingKeys: String, CodingKey {
+    case recovered
+    case error
+    case failureCategory = "failure_category"
+  }
 }
 
 private struct RecoveryFileDTO: Decodable {
@@ -113,8 +130,10 @@ private struct RecoveryFileDTO: Decodable {
 
 private struct RecoveredFileDTO: Decodable {
   let textB64: String?
+  let failureCategory: String?
 
   enum CodingKeys: String, CodingKey {
     case textB64 = "text_b64"
+    case failureCategory = "failure_category"
   }
 }
