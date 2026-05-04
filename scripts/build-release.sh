@@ -106,6 +106,12 @@ cp "$ROOT_DIR/gui/Info.plist" "$APP_CONTENTS/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${VERSION#v}" "$APP_CONTENTS/Info.plist" 2>/dev/null \
   || /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VERSION#v}" "$APP_CONTENTS/Info.plist"
 
+# Generate AppIcon.icns from assets/ and stage it into the bundle. Must happen
+# before sign-release.sh so the codesign seal includes the icon.
+log "Generating AppIcon.icns and staging into bundle"
+bash "$ROOT_DIR/scripts/build-app-icon.sh"
+cp "$ROOT_DIR/gui/.build/icon/AppIcon.icns" "$APP_CONTENTS/Resources/AppIcon.icns"
+
 # --- Sign + notarize (credential-driven, skipped without secrets) ----------
 
 log "Sign + notarize step"

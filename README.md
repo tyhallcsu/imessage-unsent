@@ -438,7 +438,16 @@ Other useful targets:
 make daemon-build    # swift build daemon -c release (no install)
 make gui-build       # swift build gui -c release (no app bundle)
 make swift-test      # daemon + gui swift test in one shot
+make icon            # regenerate AppIcon.icns from assets/MacOS_AppIcon_iMessage_Unsent.png
 ```
+
+### App icon
+
+The macOS app icon source lives at [`assets/MacOS_AppIcon_iMessage_Unsent.png`](assets/MacOS_AppIcon_iMessage_Unsent.png) (1254×1254 PNG, **RGBA with transparent corners outside the squircle**). It is converted to `AppIcon.icns` (10 standard sizes, 16²–1024²) by [`scripts/build-app-icon.sh`](scripts/build-app-icon.sh) using `sips` + `iconutil`. The generated `.icns` is gitignored under `gui/.build/icon/` and regenerated on every release / dev build — both `scripts/build-release.sh` (the `IMUMenuBar.app` produced by `make release` / `make rc-smoke`) and `script/build_and_run.sh` (`make gui-run`) invoke the generator and stage the icon into `IMUMenuBar.app/Contents/Resources/`. The bundle declares it via `CFBundleIconFile = AppIcon` in [`gui/Info.plist`](gui/Info.plist).
+
+If you replace the source PNG: it MUST be RGBA with alpha=0 outside the rounded-square artwork. An RGB-only PNG with a baked-in black background will render as a black square in Finder/Get Info, because `sips` and `iconutil` faithfully preserve whatever's in the source. Verify with `sips -g hasAlpha assets/MacOS_AppIcon_iMessage_Unsent.png` (must report `yes`).
+
+After a fresh build, Finder may briefly show the cached old icon — `touch dist/IMUMenuBar*.app` (or `killall Finder`) clears it.
 
 ## Working-app checklist
 

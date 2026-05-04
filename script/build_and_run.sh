@@ -20,10 +20,14 @@ swift build --package-path "$PACKAGE_DIR"
 BUILD_BINARY="$(swift build --package-path "$PACKAGE_DIR" --show-bin-path)/$APP_NAME"
 
 rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_MACOS"
+mkdir -p "$APP_MACOS" "$APP_CONTENTS/Resources"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
 cp "$PACKAGE_DIR/Info.plist" "$INFO_PLIST"
+
+# Stage AppIcon.icns so the dev-built .app shows the real icon in Finder/Dock.
+bash "$ROOT_DIR/scripts/build-app-icon.sh"
+cp "$ROOT_DIR/gui/.build/icon/AppIcon.icns" "$APP_CONTENTS/Resources/AppIcon.icns"
 
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
