@@ -86,6 +86,7 @@ def main() -> int:
     parser.add_argument("--ab", type=Path, required=True)
     parser.add_argument("--wal-json", type=Path, required=True)
     parser.add_argument("--iphone-json", type=Path, required=True)
+    parser.add_argument("--failure-category", default="")
     args = parser.parse_args()
 
     wal_candidates = read_wal_candidates(args.wal_json)
@@ -108,6 +109,8 @@ def main() -> int:
             "source": "iphone_backup",
             "wal_offset": None,
         }
+    if not recovered.get("text_b64"):
+        recovered["failure_category"] = args.failure_category or "wal_checkpointed"
 
     payload = {
         "schema_version": 1,

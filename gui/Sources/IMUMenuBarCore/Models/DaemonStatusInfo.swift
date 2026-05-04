@@ -59,6 +59,7 @@ public struct ArchiveHistoryEntryDTO: Codable, Equatable, Identifiable {
   public let text: String?
   public let error: String?
   public let archivePath: String
+  public let failureCategory: RecoveryFailureCategory?
 
   enum CodingKeys: String, CodingKey {
     case id
@@ -69,6 +70,7 @@ public struct ArchiveHistoryEntryDTO: Codable, Equatable, Identifiable {
     case text
     case error
     case archivePath = "archive_path"
+    case failureCategory = "failure_category"
   }
 
   public init(
@@ -79,7 +81,8 @@ public struct ArchiveHistoryEntryDTO: Codable, Equatable, Identifiable {
     recovered: Bool,
     text: String?,
     error: String?,
-    archivePath: String
+    archivePath: String,
+    failureCategory: RecoveryFailureCategory? = nil
   ) {
     self.id = id
     self.detectedAt = detectedAt
@@ -89,5 +92,6 @@ public struct ArchiveHistoryEntryDTO: Codable, Equatable, Identifiable {
     self.text = text
     self.error = error
     self.archivePath = archivePath
+    self.failureCategory = failureCategory
   }
 }

@@ -12,6 +12,7 @@ public struct RecoveryDetail: Equatable {
   public let recoveryError: String?
   public let archivePath: String
   public let snapshotFiles: [String]
+  public let failureCategory: RecoveryFailureCategory?
 
   public init(
     id: String,
@@ -24,7 +25,8 @@ public struct RecoveryDetail: Equatable {
     recoveredText: String?,
     recoveryError: String?,
     archivePath: String,
-    snapshotFiles: [String]
+    snapshotFiles: [String],
+    failureCategory: RecoveryFailureCategory? = nil
   ) {
     self.id = id
     self.handle = handle
@@ -37,5 +39,6 @@ public struct RecoveryDetail: Equatable {
     self.recoveryError = recoveryError
     self.archivePath = archivePath
     self.snapshotFiles = snapshotFiles
+    self.failureCategory = failureCategory
   }
 }

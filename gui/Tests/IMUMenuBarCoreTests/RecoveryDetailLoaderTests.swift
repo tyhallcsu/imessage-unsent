@@ -80,6 +80,89 @@ final class RecoveryDetailLoaderTests: XCTestCase {
     }
   }
 
+  func testReadsFailureCategoryFromRecoveryJSON() throws {
+    let archive = workDir.appendingPathComponent("2026-05-04T000000Z-103", isDirectory: true)
+    try writeFailingArchive(
+      at: archive,
+      recoveryRecoveredFields: ["text_b64": NSNull(), "failure_category": "wal_checkpointed"],
+      manifestRecoveryError: "recover.sh exited 0"
+    )
+    let detail = try FileSystemRecoveryDetailLoader().load(archiveDir: archive)
+    XCTAssertFalse(detail.recovered)
+    XCTAssertEqual(detail.failureCategory, .walCheckpointed)
+  }
+
+  func testFallsBackToManifestRecoveryFailureCategoryWhenRecoveryJSONLacksIt() throws {
+    let archive = workDir.appendingPathComponent("2026-05-04T000100Z-104", isDirectory: true)
+    try writeFailingArchive(
+      at: archive,
+      recoveryRecoveredFields: ["text_b64": NSNull()],
+      manifestRecoveryError: "recover.sh exited 1",
+      manifestFailureCategory: "unknown_handle"
+    )
+    let detail = try FileSystemRecoveryDetailLoader().load(archiveDir: archive)
+    XCTAssertEqual(detail.failureCategory, .unknownHandle)
+  }
+
+  func testUnknownRawCategoryDecodesAsUnknown() throws {
+    let archive = workDir.appendingPathComponent("2026-05-04T000200Z-105", isDirectory: true)
+    try writeFailingArchive(
+      at: archive,
+      recoveryRecoveredFields: ["text_b64": NSNull(), "failure_category": "totally_made_up"],
+      manifestRecoveryError: nil
+    )
+    let detail = try FileSystemRecoveryDetailLoader().load(archiveDir: archive)
+    XCTAssertEqual(detail.failureCategory, .unknown)
+  }
+
+  func testFailureCategoryIsClearedWhenRecoverySucceeded() throws {
+    let archive = workDir.appendingPathComponent("2026-05-04T000300Z-106", isDirectory: true)
+    try writeArchive(at: archive, recoveredText: "recovered content")
+    let detail = try FileSystemRecoveryDetailLoader().load(archiveDir: archive)
+    XCTAssertTrue(detail.recovered)
+    XCTAssertNil(detail.failureCategory)
+  }
+
+  private func writeFailingArchive(
+    at archive: URL,
+    recoveryRecoveredFields: [String: Any],
+    manifestRecoveryError: String?,
+    manifestFailureCategory: String? = nil
+  ) throws {
+    try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+    var manifestRecovery: [String: Any] = [
+      "started_at": "2026-05-04T00:00:00.000Z",
+      "finished_at": "2026-05-04T00:00:01.000Z",
+      "exit_code": 0,
+      "recovered": false,
+      "error": manifestRecoveryError as Any? ?? NSNull()
+    ]
+    if let manifestFailureCategory {
+      manifestRecovery["failure_category"] = manifestFailureCategory
+    }
+    let manifest: [String: Any] = [
+      "detected_at": "2026-05-04T00:00:00.000Z",
+      "rowid": 999,
+      "guid": "guid-failing",
+      "handle": "+15550009999",
+      "edited_at": 0,
+      "snapshot_started_at": "2026-05-04T00:00:00.000Z",
+      "snapshot_finished_at": "2026-05-04T00:00:00.500Z",
+      "snap_files": [String: Any](),
+      "recovery": manifestRecovery
+    ]
+    try JSONSerialization.data(withJSONObject: manifest)
+      .write(to: archive.appendingPathComponent("manifest.json", isDirectory: false))
+
+    let recovery: [String: Any] = [
+      "schema_version": 1,
+      "recovered": recoveryRecoveredFields,
+      "error": NSNull()
+    ]
+    try JSONSerialization.data(withJSONObject: recovery)
+      .write(to: archive.appendingPathComponent("recovery.json", isDirectory: false))
+  }
+
   // MARK: - helpers
 
   private func writeArchive(at archive: URL, recoveredText: String) throws {

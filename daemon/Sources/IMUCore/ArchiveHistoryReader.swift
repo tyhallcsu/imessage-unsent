@@ -9,6 +9,7 @@ public struct ArchiveHistoryEntry: Codable, Equatable {
   public let text: String?
   public let error: String?
   public let archivePath: String
+  public let failureCategory: RecoveryFailureCategory?
 
   enum CodingKeys: String, CodingKey {
     case id
@@ -19,6 +20,7 @@ public struct ArchiveHistoryEntry: Codable, Equatable {
     case text
     case error
     case archivePath = "archive_path"
+    case failureCategory = "failure_category"
   }
 
   public init(
@@ -29,7 +31,8 @@ public struct ArchiveHistoryEntry: Codable, Equatable {
     recovered: Bool,
     text: String?,
     error: String?,
-    archivePath: String
+    archivePath: String,
+    failureCategory: RecoveryFailureCategory? = nil
   ) {
     self.id = id
     self.detectedAt = detectedAt
@@ -39,6 +42,7 @@ public struct ArchiveHistoryEntry: Codable, Equatable {
     self.text = text
     self.error = error
     self.archivePath = archivePath
+    self.failureCategory = failureCategory
   }
 }
 
@@ -115,6 +119,7 @@ public struct ArchiveHistoryReader {
     var recovered = manifest.recovery?.recovered ?? false
     var text: String?
     var error = manifest.recovery?.error
+    var failureCategory = manifest.recovery?.failureCategory
 
     if let recoveryData = try? Data(contentsOf: recoveryURL) {
       if let payload = try? JSONDecoder().decode(RecoveryFileDTO.self, from: recoveryData) {
@@ -130,7 +135,14 @@ public struct ArchiveHistoryReader {
         if let payloadError = payload.error, !payloadError.isEmpty {
           error = payloadError
         }
+        if let raw = payload.recovered?.failureCategory {
+          failureCategory = RecoveryFailureCategory(rawValue: raw) ?? .unknown
+        }
       }
+    }
+
+    if recovered {
+      failureCategory = nil
     }
 
     return .success(
@@ -142,7 +154,8 @@ public struct ArchiveHistoryReader {
         recovered: recovered,
         text: text,
         error: error,
-        archivePath: archiveDir.path
+        archivePath: archiveDir.path,
+        failureCategory: failureCategory
       )
     )
   }
@@ -162,8 +175,10 @@ private struct RecoveryFileDTO: Decodable {
 
 private struct RecoveredFileDTO: Decodable {
   let textB64: String?
+  let failureCategory: String?
 
   enum CodingKeys: String, CodingKey {
     case textB64 = "text_b64"
+    case failureCategory = "failure_category"
   }
 }

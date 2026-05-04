@@ -74,8 +74,18 @@ struct RecoveryRowView: View {
       Label("Not recoverable", systemImage: "exclamationmark.triangle.fill")
         .labelStyle(.iconOnly)
         .foregroundStyle(.orange)
-        .help(entry.error ?? "Not recoverable")
+        .help(badgeTooltip)
     }
+  }
+
+  private var badgeTooltip: String {
+    if let category = entry.failureCategory {
+      if let hint = category.actionableHint {
+        return "\(category.displayMessage)\n\n\(hint)"
+      }
+      return category.displayMessage
+    }
+    return entry.error ?? "Not recoverable"
   }
 
   static func initials(displayName: String?, handle: String) -> String {

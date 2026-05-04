@@ -59,6 +59,7 @@ DRY_RUN=0
 INCLUDE_IPHONE_BACKUP=0
 IPHONE_BACKUP_PATH=""
 IPHONE_BACKUP_CONFIG="$HOME/.config/imessage-unsent/iphone-backup-paths.txt"
+FAILURE_CATEGORY=""
 
 usage() {
   sed -n '2,30p' "$0"
@@ -187,7 +188,8 @@ json_report() {
     --msi "$MSI" \
     --ab "$AB" \
     --wal-json "$WAL_JSON" \
-    --iphone-json "$IPHONE_BACKUP_JSON"
+    --iphone-json "$IPHONE_BACKUP_JSON" \
+    --failure-category "${FAILURE_CATEGORY:-}"
 }
 
 batch_first_wal_result() {
@@ -380,6 +382,7 @@ HANDLE_ROWID=$(imu_handle_rowid "$SNAP" "$HANDLE")
 if [[ -z "$HANDLE_ROWID" ]]; then
   log "  No handle row for '$HANDLE' — try the alternate format (E.164 vs raw, email vs phone)."
   log "  Hint: sqlite3 -readonly $SNAP \"SELECT DISTINCT id FROM handle WHERE id LIKE '%${HANDLE: -4}%';\""
+  FAILURE_CATEGORY="unknown_handle"
   if [[ "$JSON_MODE" == "1" ]]; then
     printf '[]\n' > "$WAL_JSON"
     json_report
@@ -397,6 +400,7 @@ log "  -> chat.ROWID = ${CHAT_ROWID:-(none)}"
 
 if [[ -z "$CHAT_ROWID" ]]; then
   log "  ABORT: no chat found for handle $HANDLE"
+  FAILURE_CATEGORY="unknown_handle"
   if [[ "$JSON_MODE" == "1" ]]; then
     printf '[]\n' > "$WAL_JSON"
     json_report
@@ -426,6 +430,7 @@ if [[ -z "$ROWID" ]]; then
   log "  No unsent inbound message found in chat $CHAT_ROWID."
   log "  If you're sure one exists, check edited messages too:"
   log "    sqlite3 -readonly $SNAP \"SELECT ROWID, date_edited, is_empty FROM message WHERE handle_id=$HANDLE_ROWID AND date_edited!=0 ORDER BY date DESC LIMIT 10;\""
+  FAILURE_CATEGORY="not_in_local_wal"
   if [[ "$JSON_MODE" == "1" ]]; then
     printf '[]\n' > "$WAL_JSON"
     json_report
@@ -506,6 +511,7 @@ else
   if [[ -z "$WAL_RESULTS" ]]; then
     log "  No pre-retract text found following any GUID occurrence."
     printf "No pre-retract text found following any GUID occurrence.\n" > "$WORK/wal-hits.txt"
+    FAILURE_CATEGORY="wal_checkpointed"
   else
     while IFS=$'\t' read -r off len text; do
       text_repr=$(python3 -c 'import sys; print(repr(sys.argv[1]))' "$text")
