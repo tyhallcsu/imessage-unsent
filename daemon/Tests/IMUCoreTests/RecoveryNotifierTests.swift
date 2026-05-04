@@ -246,6 +246,31 @@ private final class RecordingPoster: NativeNotificationPosting {
   }
 }
 
+final class SystemNotificationAuthorizationProbeBundleGuardTests: XCTestCase {
+  // The XCTest runner host has no bundleIdentifier when invoked via
+  // `swift test`, so this exercises the same skip path the daemon hits in
+  // production. If the test ever runs under a bundled host (Xcode) the
+  // probe goes down the live UN path and the test should be skipped, not
+  // fail — that codepath is exercised by the StubAuthorizationProbe tests.
+  func testReturnsNotDeterminedWhenRunningWithoutAppBundle() throws {
+    try XCTSkipUnless(
+      Bundle.main.bundleIdentifier == nil,
+      "Probe bundle-guard test only meaningful when host has no bundleIdentifier"
+    )
+
+    let probe = SystemNotificationAuthorizationProbe()
+    let exp = expectation(description: "probe returns synchronously without UN call")
+    var observed: UNAuthorizationStatus?
+    probe.getAuthorizationStatus { status in
+      observed = status
+      exp.fulfill()
+    }
+    wait(for: [exp], timeout: 1)
+
+    XCTAssertEqual(observed, .notDetermined)
+  }
+}
+
 private final class StubAuthorizationProbe: NotificationAuthorizationProbing {
   let status: UNAuthorizationStatus
   private(set) var callCount = 0
