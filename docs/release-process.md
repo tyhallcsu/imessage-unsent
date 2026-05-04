@@ -101,7 +101,10 @@ producing testable builds.
 3. **Run tests** for both Swift packages — a red test gates the release.
 4. **`scripts/build-release.sh`** builds release-mode binaries, assembles the
    GUI .app bundle (with `CFBundleShortVersionString` and `CFBundleVersion`
-   set from the tag), and produces tarball + zip + sha256s.
+   set from the tag), regenerates `AppIcon.icns` from
+   `assets/MacOS_AppIcon_iMessage_Unsent.png` via `scripts/build-app-icon.sh`
+   and stages it into `IMUMenuBar.app/Contents/Resources/` before signing,
+   and produces tarball + zip + sha256s.
 5. **`scripts/release-notes.sh`** generates Markdown notes from conventional
    commits since the previous tag.
 6. **Build a source tarball** (preserved from the v0.1 release process for

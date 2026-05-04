@@ -7,7 +7,7 @@ SHELL_SOURCES := scripts/*.sh scripts/lib/*.sh tests/fixtures/*.sh tests/bats/he
 .PHONY: fixture fixture-check shellcheck python-check bats python-test test \
 	daemon-build daemon-test daemon-install daemon-uninstall \
 	gui-build gui-test gui-run swift-test \
-	doctor rc-smoke \
+	doctor rc-smoke icon \
 	release release-notes
 
 fixture:
@@ -55,6 +55,13 @@ gui-test:
 
 gui-run:
 	bash script/build_and_run.sh run
+
+# Regenerate gui/.build/icon/AppIcon.icns from assets/MacOS_AppIcon_iMessage_Unsent.png.
+# Useful when iterating on the icon; build-release.sh and build_and_run.sh
+# also invoke this script automatically, so this target is rarely needed
+# directly.
+icon:
+	bash scripts/build-app-icon.sh
 
 swift-test: daemon-test gui-test
 
