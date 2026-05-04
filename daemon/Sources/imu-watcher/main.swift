@@ -134,9 +134,19 @@ final class WatcherDaemon {
           notifier?.notify(complete)
           statusBoard.recordRecovery()
           processedEvents.append(event)
+          do {
+            if complete.recovered {
+              try detector.markRecovered(guid: event.guid)
+            } else {
+              try detector.markFailed(guid: event.guid)
+            }
+          } catch {
+            log("dedup state save failed guid=\(event.guid) error=\(error.localizedDescription)")
+          }
         } catch {
           log("archive error rowid=\(event.rowid) error=\(error.localizedDescription)")
           statusBoard.recordError(error.localizedDescription)
+          try? detector.markFailed(guid: event.guid)
         }
       }
       try detector.markProcessed(processedEvents)
