@@ -17,7 +17,7 @@
 #          imu-watcher / scripts/recover.sh / scripts/lib / com.imu.watcher.plist
 #          / install.sh
 #        - GUI zip exists, sha256 file matches, contents include
-#          IMUMenuBar.app/Contents/MacOS/IMUMenuBar / Info.plist
+#          iMessage Unsent.app/Contents/MacOS/IMUMenuBar / Info.plist
 #   8. Confirms scripts/uninstall-daemon.sh is present and executable so users
 #      have an exit ramp (does not run it).
 #
@@ -73,9 +73,10 @@ DAEMON_REQUIRED_ENTRIES=(
 )
 
 # Required entries inside the GUI .app zip, validated by `unzip -Z1`.
+# Note: bundle is "iMessage Unsent.app" (with space) — Apple convention.
 GUI_REQUIRED_ENTRIES=(
-  "IMUMenuBar.app/Contents/MacOS/IMUMenuBar"
-  "IMUMenuBar.app/Contents/Info.plist"
+  "iMessage Unsent.app/Contents/MacOS/IMUMenuBar"
+  "iMessage Unsent.app/Contents/Info.plist"
 )
 
 # Validates a version string against the same regex build-release.sh uses.
@@ -228,7 +229,7 @@ rc_main() {
   local arch
   arch="$(uname -m)"
   local daemon_tarball="$output_dir/imu-watcher-${version}-${arch}.tar.gz"
-  local gui_zip="$output_dir/IMUMenuBar-${version}.zip"
+  local gui_zip="$output_dir/iMessage-Unsent-${version}.zip"
   local notes_md="$output_dir/RELEASE_NOTES.md"
 
   # --- 1. shellcheck -------------------------------------------------------

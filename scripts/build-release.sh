@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
-# Build release artifacts for the daemon (imu-watcher) and GUI (IMUMenuBar.app).
+# Build release artifacts for the daemon (imu-watcher) and GUI (iMessage Unsent.app).
 #
 # Usage: scripts/build-release.sh <version> [output-dir]
 #   <version>     e.g. v0.4.0 or v0.4.0-rc1 (the leading "v" is required)
 #   [output-dir]  defaults to ./dist
 #
 # Produces, under <output-dir>/:
-#   imu-watcher-<version>-<arch>.tar.gz   + .sha256
-#     ├── imu-watcher                     (release-mode daemon binary)
-#     ├── scripts/                        (recover.sh + lib/)
-#     ├── com.imu.watcher.plist           (LaunchAgent template)
-#     ├── install.sh                      (a thin wrapper around scripts/install-daemon.sh)
+#   imu-watcher-<version>-<arch>.tar.gz       + .sha256
+#     ├── imu-watcher                         (release-mode daemon binary)
+#     ├── scripts/                            (recover.sh + lib/)
+#     ├── com.imu.watcher.plist               (LaunchAgent template)
+#     ├── install.sh                          (a thin wrapper around scripts/install-daemon.sh)
 #     ├── LICENSE
 #     └── README.md
-#   IMUMenuBar-<version>.zip               + .sha256
-#     └── IMUMenuBar.app/                 (release-mode menu bar app bundle)
+#   iMessage-Unsent-<version>.zip             + .sha256
+#     └── iMessage Unsent.app/                (release-mode menu bar app bundle)
+#
+# The bundle has a space ("iMessage Unsent.app") to match Apple's user-facing
+# convention; the zip filename uses a dash ("iMessage-Unsent-") to keep
+# downloads URL-safe.
 #
 # Code-signing and notarization are delegated to scripts/sign-release.sh
 # (issue #20). That script is credential-driven: when Developer ID env vars
@@ -48,7 +52,8 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCH="$(uname -m)"
 DAEMON_TARBALL_NAME="imu-watcher-${VERSION}-${ARCH}.tar.gz"
-GUI_ZIP_NAME="IMUMenuBar-${VERSION}.zip"
+GUI_ZIP_NAME="iMessage-Unsent-${VERSION}.zip"
+GUI_APP_BUNDLE_NAME="iMessage Unsent.app"
 STAGE_DIR="$(mktemp -d -t imu-release.XXXXXX)"
 trap 'rm -rf "$STAGE_DIR"' EXIT
 
@@ -95,7 +100,7 @@ if [[ ! -x "$GUI_BIN" ]]; then
   exit 1
 fi
 
-APP_STAGE="$STAGE_DIR/IMUMenuBar.app"
+APP_STAGE="$STAGE_DIR/$GUI_APP_BUNDLE_NAME"
 APP_CONTENTS="$APP_STAGE/Contents"
 mkdir -p "$APP_CONTENTS/MacOS" "$APP_CONTENTS/Resources"
 install -m 0755 "$GUI_BIN" "$APP_CONTENTS/MacOS/IMUMenuBar"
@@ -124,7 +129,7 @@ tar -C "$STAGE_DIR" -czf "$OUTPUT_DIR_ABS/$DAEMON_TARBALL_NAME" "imu-watcher-${V
 ( cd "$OUTPUT_DIR_ABS" && shasum -a 256 "$DAEMON_TARBALL_NAME" > "${DAEMON_TARBALL_NAME}.sha256" )
 
 log "Packaging GUI -> $GUI_ZIP_NAME"
-( cd "$STAGE_DIR" && /usr/bin/zip -qry "$OUTPUT_DIR_ABS/$GUI_ZIP_NAME" "IMUMenuBar.app" )
+( cd "$STAGE_DIR" && /usr/bin/zip -qry "$OUTPUT_DIR_ABS/$GUI_ZIP_NAME" "$GUI_APP_BUNDLE_NAME" )
 ( cd "$OUTPUT_DIR_ABS" && shasum -a 256 "$GUI_ZIP_NAME" > "${GUI_ZIP_NAME}.sha256" )
 
 # --- Summary ---------------------------------------------------------------

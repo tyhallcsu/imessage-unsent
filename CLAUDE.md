@@ -10,7 +10,7 @@ Three components, one repo:
 
 - **`scripts/recover.sh`** — bash + Python forensic pipeline; six recovery vectors layered (snapshot → locate → msi → attributedBody → WAL byte-scan → exporter cross-check → external backups). Read-only by design.
 - **`daemon/`** (Swift, IMUCore + imu-watcher) — `LaunchAgent` that watches `chat.db-wal` via FSEvents + a 1 Hz polling fallback, runs the retraction detector against `chat.db`, archives every event, and exposes a Unix-domain control socket. Built into `~/Library/Application Support/imessage-unsent/bin/imu-watcher` by `make daemon-install`.
-- **`gui/`** (SwiftUI menu-bar app, IMUMenuBar + IMUMenuBarCore) — surfaces the daemon's history + status, has Settings/Health-Check/About windows, owns notification permission. Built into `IMUMenuBar.app`.
+- **`gui/`** (SwiftUI menu-bar app, IMUMenuBar + IMUMenuBarCore) — surfaces the daemon's history + status, has Settings/Health-Check/About windows, owns notification permission. Built into `iMessage Unsent.app` (Swift target: `IMUMenuBar`; bundle id: `com.imessage-unsent.app`).
 
 `tests/` has bats (shell) + pytest (Python) + Swift XCTest. CI runs all three on every PR.
 

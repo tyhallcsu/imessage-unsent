@@ -20,7 +20,7 @@ flowchart LR
     subgraph Project["imessage-unsent"]
         CLI["scripts/recover.sh<br/>(one-shot CLI)"]
         Daemon["imu-watcher<br/>(LaunchAgent)"]
-        GUI["IMUMenuBar.app<br/>(menu bar UI)"]
+        GUI["iMessage Unsent.app<br/>(menu bar UI)"]
     end
 
     subgraph Storage["~/Library/Application Support/imessage-unsent/"]
