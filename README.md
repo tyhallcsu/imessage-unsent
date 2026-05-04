@@ -270,6 +270,8 @@ The cases this tool will reliably miss:
 
 The daemon mitigates the WAL-checkpoint race by maintaining a **rolling snapshot buffer** at `~/Library/Application Support/imessage-unsent/wal-history/` — every change to `chat.db-wal` is copied into the buffer (capped at 30 snapshots / 5 minutes by default), so the recovery script can also scan WAL frames that the live file no longer contains. This dramatically improves the recovery rate for slow-unsend cases but cannot help if the daemon wasn't running, didn't have Full Disk Access, or wasn't installed at the time the message was originally written.
 
+The buffer is implemented in [`daemon/Sources/IMUCore/WALSnapshotter.swift`](daemon/Sources/IMUCore/WALSnapshotter.swift) and merged into the recovery flow by [`scripts/lib/wal_merge_candidates.py`](scripts/lib/wal_merge_candidates.py). Full deep-dive in [`docs/recovery-vectors.md` § Vector 4 § The WAL rolling snapshot buffer](docs/recovery-vectors.md#the-wal-rolling-snapshot-buffer-issue-67), including what the buffer can and can't fix and operational notes on its disk cost.
+
 If recovery comes back empty, your fastest manual fallback is **Vector 6 → APFS local snapshots**:
 
 ```bash

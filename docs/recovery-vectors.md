@@ -167,6 +167,28 @@ When `--json` is set, [`scripts/lib/json_report.py`](../scripts/lib/json_report.
 - The cross-check is: candidate length should match Vector 2's `otr.0.le`. The README's [byte-level walkthrough](../README.md#why-the-wal-vector-works-byte-level) shows the actual 95-byte recovery from the sanitized case study.
 - This is the file the daemon's `RetractionDetector` watches via FSEvents — see [`daemon/Sources/IMUCore/FSWatcher.swift`](../daemon/Sources/IMUCore/FSWatcher.swift) — so that the daemon can snapshot before SQLite checkpoints the retraction away.
 
+### The WAL rolling snapshot buffer (issue #67)
+
+Vector 4 wins or loses on a single thing: **was the pre-retract page still in the live `chat.db-wal` when we read it?** SQLite checkpoints the WAL into `chat.db` on its own schedule (`wal_autocheckpoint = 1000` by default — every ~1000 page changes), so the live WAL is effectively a sliding window of the most recent few seconds-to-minutes of activity. Slow unsends, long messages, and a chatty conversation all push the pre-retract page out of that window before the daemon's `RetractionDetector` ever fires.
+
+The daemon mitigates this with a **rolling snapshot buffer** at `~/Library/Application Support/imessage-unsent/wal-history/`. Implementation in [`WALSnapshotter.swift`](../daemon/Sources/IMUCore/WALSnapshotter.swift):
+
+- On every `chat.db-wal` change (via FSEvents + 1 Hz polling fallback), the daemon copies the *current* WAL into the buffer with a timestamped filename.
+- The buffer is capped — default **30 snapshots** AND **5 minutes** of wall time, whichever is more restrictive. Older snapshots get pruned.
+- When `recover.sh` runs (either ad-hoc CLI or driven by the daemon's `ArchivePipeline`), it scans **every** WAL file in `wal-history/` in addition to the live `chat.db-wal` ([`recover.sh:529-560`](../scripts/recover.sh#L529-L560)). The candidates are merged by [`wal_merge_candidates.py`](../scripts/lib/wal_merge_candidates.py) into a single `wal-candidates.json` so the downstream JSON report sees all of them.
+
+**What this fixes:** the dominant Vector-4 failure mode where the pre-retract text was in the WAL ~30 s ago but is gone by the time the daemon archives. With the buffer, the daemon retains those 30 s of WAL state and can recover from any of them.
+
+**What it does NOT fix:**
+- Retractions that happened **before the daemon was installed** — there's no historical buffer to draw from.
+- Retractions where the daemon was running but didn't have **Full Disk Access** — `open(2)` on `chat.db-wal` fails before the snapshot copy, so nothing lands in the buffer. (The Settings → Full Disk Access pane will warn when this happens.)
+- Cases where the WAL was already checkpointed past the retraction *before* the buffer captured a frame containing the pre-retract page. The 30/5min cap is a backstop; if a long delay happens between the original message write and the unsend (e.g. the user reads a message hours later then the sender unsends it), the relevant WAL state is gone everywhere.
+
+**Operational notes:**
+- Buffer disk usage is bounded by the cap (default ~30 × WAL size = a few MB at most for typical conversations).
+- Compacting an archive (Settings → Compact, see issue #95) preserves the recovery output but removes its `wal-history/` snapshot copy. The daemon's *live* `wal-history/` continues to roll regardless.
+- The buffer makes the recovery rate strictly better; there's no failure mode it introduces. The cost is constant disk + the per-WAL-change copy.
+
 ---
 
 ## Vector 5 — `imessage-exporter` cross-check
