@@ -361,6 +361,7 @@ public final class DefaultHealthChecker: HealthChecking {
     checks.append(checkDaemonRunning(paths: resolved, pong: pong))
     checks.append(checkDaemonStatus(status: status, pong: pong))
     checks.append(checkFullDiskAccess(paths: resolved))
+    checks.append(checkDaemonFullDiskAccess(status: status, pong: pong, paths: resolved))
     checks.append(checkDataDir(paths: resolved))
     checks.append(checkArchiveDir(paths: resolved))
     checks.append(checkSocketExists(paths: resolved, pong: pong))
@@ -658,6 +659,73 @@ public final class DefaultHealthChecker: HealthChecking {
       remediation: "Open System Settings → Privacy & Security → Full Disk Access and add `imu-watcher` from \(paths.daemonBinary.path).",
       remediationURL: settingsURL
     )
+  }
+
+  /// Authoritative FDA check — uses the daemon's own `open(2)` probe result
+  /// from the status response, instead of the heuristic GUI-process visibility
+  /// check above. The daemon binary has its own TCC entry, so the GUI can be
+  /// granted FDA while the daemon is denied (or vice versa) — that mismatch
+  /// is exactly what this check exists to surface (#59 / FDA refresh dance).
+  private func checkDaemonFullDiskAccess(
+    status: DaemonStatusInfo?,
+    pong: Bool,
+    paths: HealthCheckPaths
+  ) -> HealthCheck {
+    let id = "daemon.fda"
+    let title = "Daemon Full Disk Access"
+    let settingsURL = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles")
+    guard pong, let status else {
+      return HealthCheck(
+        id: id,
+        category: .permissions,
+        order: 1,
+        severity: .info,
+        title: title,
+        summary: "Daemon not reachable — cannot verify FDA",
+        detail: "Start the daemon (`make daemon-install` and ensure it is bootstrapped) and rerun this check.",
+        remediation: nil,
+        remediationURL: nil
+      )
+    }
+    switch status.chatDBReadable {
+    case .some(true):
+      let probedAt = status.chatDBProbedAt.map { " · last probed \($0)" } ?? ""
+      return HealthCheck(
+        id: id,
+        category: .permissions,
+        order: 1,
+        severity: .pass,
+        title: title,
+        summary: "Daemon can open `chat.db`\(probedAt)",
+        detail: "The daemon successfully opened `chat.db` read-only, which means TCC has granted Full Disk Access to `imu-watcher`. Recoveries should run when retractions arrive.",
+        remediation: nil,
+        remediationURL: nil
+      )
+    case .some(false):
+      return HealthCheck(
+        id: id,
+        category: .permissions,
+        order: 1,
+        severity: .fail,
+        title: title,
+        summary: "Daemon denied access to `chat.db` — Full Disk Access missing or stale",
+        detail: "The daemon could `stat` the WAL but `open(2)` on `chat.db` failed. macOS TCC tracks Full Disk Access per binary; after `make daemon-install` rebuilds `imu-watcher`, an existing FDA grant for the previous binary may not apply.",
+        remediation: "Open System Settings → Privacy & Security → Full Disk Access. If `imu-watcher` is listed, toggle it OFF and back ON to refresh the grant. Otherwise click + and add it from `\(paths.daemonBinary.path)`.",
+        remediationURL: settingsURL
+      )
+    case .none:
+      return HealthCheck(
+        id: id,
+        category: .permissions,
+        order: 1,
+        severity: .info,
+        title: title,
+        summary: "Daemon has not yet probed `chat.db`",
+        detail: "The daemon probes Full Disk Access at startup and every minute thereafter. Wait ~60s and rerun, or restart the daemon.",
+        remediation: nil,
+        remediationURL: nil
+      )
+    }
   }
 
   private func checkDataDir(paths: HealthCheckPaths) -> HealthCheck {

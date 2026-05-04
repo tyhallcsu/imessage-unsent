@@ -18,6 +18,7 @@ final class DefaultHealthCheckerTests: XCTestCase {
     XCTAssertEqual(byID["daemon.running"]?.severity, .pass)
     XCTAssertEqual(byID["daemon.status"]?.severity, .pass)
     XCTAssertEqual(byID["fda.granted"]?.severity, .pass)
+    XCTAssertEqual(byID["daemon.fda"]?.severity, .pass)
     XCTAssertEqual(byID["data.dir"]?.severity, .pass)
     XCTAssertEqual(byID["archive.dir"]?.severity, .pass)
     XCTAssertEqual(byID["socket.exists"]?.severity, .pass)
@@ -278,6 +279,89 @@ final class DefaultHealthCheckerTests: XCTestCase {
     XCTAssertTrue((row.detail ?? "").contains("…"), "long stderr should be truncated with an ellipsis")
   }
 
+  // MARK: - daemon.fda (issue #59 follow-up)
+
+  func testDaemonFDA_isPass_whenChatDBReadableTrue() async {
+    let env = TestEnvironment.allHealthy()
+    env.daemon.statusResult = DaemonStatusInfo(
+      state: "watching",
+      version: "0.4.1",
+      startedAt: "2026-05-02T12:00:00Z",
+      uptimeSeconds: 3600,
+      lastWalChangeAt: "2026-05-02T12:30:00Z",
+      lastWalSize: 65_536,
+      recoveryCount: 4,
+      lastError: nil,
+      dataDir: env.paths.dataDir.path,
+      notificationsShow: true,
+      chatDBReadable: true,
+      chatDBProbedAt: "2026-05-02T13:00:00Z"
+    )
+    let checks = await env.checker.runAll()
+
+    let row = try! XCTUnwrap(checks.first { $0.id == "daemon.fda" })
+    XCTAssertEqual(row.severity, .pass)
+    XCTAssertTrue(row.summary.contains("can open"))
+  }
+
+  func testDaemonFDA_isFail_whenChatDBReadableFalse_withSettingsURL() async {
+    let env = TestEnvironment.allHealthy()
+    env.daemon.statusResult = DaemonStatusInfo(
+      state: "watching",
+      version: "0.4.1",
+      startedAt: "2026-05-02T12:00:00Z",
+      uptimeSeconds: 3600,
+      lastWalChangeAt: nil,
+      lastWalSize: 0,
+      recoveryCount: 0,
+      lastError: "failed to open chat.db read-only: authorization denied",
+      dataDir: env.paths.dataDir.path,
+      notificationsShow: true,
+      chatDBReadable: false,
+      chatDBProbedAt: "2026-05-02T13:00:00Z"
+    )
+    let checks = await env.checker.runAll()
+
+    let row = try! XCTUnwrap(checks.first { $0.id == "daemon.fda" })
+    XCTAssertEqual(row.severity, .fail)
+    XCTAssertTrue(row.summary.contains("denied"))
+    XCTAssertEqual(row.remediationURL?.scheme, "x-apple.systempreferences")
+  }
+
+  func testDaemonFDA_isInfo_whenChatDBReadableNil() async {
+    let env = TestEnvironment.allHealthy()
+    env.daemon.statusResult = DaemonStatusInfo(
+      state: "watching",
+      version: "0.4.1",
+      startedAt: "2026-05-02T12:00:00Z",
+      uptimeSeconds: 30,  // freshly started, hasn't probed yet
+      lastWalChangeAt: nil,
+      lastWalSize: 0,
+      recoveryCount: 0,
+      lastError: nil,
+      dataDir: env.paths.dataDir.path,
+      notificationsShow: true,
+      chatDBReadable: nil,
+      chatDBProbedAt: nil
+    )
+    let checks = await env.checker.runAll()
+
+    let row = try! XCTUnwrap(checks.first { $0.id == "daemon.fda" })
+    XCTAssertEqual(row.severity, .info)
+    XCTAssertTrue(row.summary.contains("not yet probed"))
+  }
+
+  func testDaemonFDA_isInfo_whenDaemonNotReachable() async {
+    let env = TestEnvironment.allHealthy()
+    env.daemon.pingResult = false
+    env.daemon.statusResult = nil
+    let checks = await env.checker.runAll()
+
+    let row = try! XCTUnwrap(checks.first { $0.id == "daemon.fda" })
+    XCTAssertEqual(row.severity, .info)
+    XCTAssertTrue(row.summary.contains("Daemon not reachable"))
+  }
+
   func testLaunchctlServiceTargetIncludesUid() {
     // Spot-check the default helper so a future refactor doesn't silently drop
     // the uid component of the launchctl service target.
@@ -372,7 +456,9 @@ private final class TestEnvironment {
       recoveryCount: 4,
       lastError: nil,
       dataDir: paths.dataDir.path,
-      notificationsShow: true
+      notificationsShow: true,
+      chatDBReadable: true,
+      chatDBProbedAt: "2026-05-02T13:00:00Z"
     )
 
     let notifications = StubNotificationProbe()
