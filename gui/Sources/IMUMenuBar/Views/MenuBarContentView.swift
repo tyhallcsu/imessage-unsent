@@ -42,6 +42,12 @@ struct MenuBarContentView: View {
       Button("Open Settings") {
         openAppURL("imu://settings")
       }
+
+      Divider()
+
+      Button("About imessage-unsent…") {
+        openAppURL("imu://about")
+      }
       Button("Quit") {
         NSApp.terminate(nil)
       }

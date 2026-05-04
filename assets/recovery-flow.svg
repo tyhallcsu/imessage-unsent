@@ -1,77 +1,123 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 540" width="1200" height="540" role="img" aria-label="imessage-unsent recovery workflow">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 540" width="1200" height="540" role="img" aria-labelledby="title desc">
+  <title id="title">imessage-unsent recovery workflow</title>
+  <desc id="desc">A six-step workflow showing snapshot, row discovery, metadata readout, WAL scanning, candidate recovery, and cross-check plus archive.</desc>
   <defs>
-    <linearGradient id="banner" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#0f172a"/>
-      <stop offset="1" stop-color="#172554"/>
+    <linearGradient id="board" x1="70" y1="48" x2="1120" y2="500" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#182131"/>
+      <stop offset="0.58" stop-color="#101827"/>
+      <stop offset="1" stop-color="#0a1019"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="40" y1="24" x2="1164" y2="516" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#55647c" stop-opacity="0.82"/>
+      <stop offset="1" stop-color="#94a3b8" stop-opacity="0.16"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#172133"/>
+      <stop offset="1" stop-color="#111827"/>
     </linearGradient>
     <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#2dd4bf"/>
-      <stop offset="0.5" stop-color="#60a5fa"/>
-      <stop offset="1" stop-color="#a78bfa"/>
+      <stop offset="0" stop-color="#67e8f9"/>
+      <stop offset="0.55" stop-color="#2dd4bf"/>
+      <stop offset="1" stop-color="#14b8a6"/>
     </linearGradient>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
-      <path d="M0 0 L0 6 L8 3 z" fill="#64748b"/>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="8.5" refY="6" orient="auto">
+      <path d="M0 0 L0 12 L10 6 z" fill="#607188"/>
     </marker>
   </defs>
 
-  <rect width="1200" height="540" fill="#f8fafc"/>
-  <rect x="0" y="0" width="1200" height="112" fill="url(#banner)"/>
-  <text x="64" y="70" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="40" font-weight="750" letter-spacing="0" fill="#f8fafc">Recovery workflow</text>
-  <text x="64" y="98" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="16" letter-spacing="0" fill="#cbd5e1">The same sequence implemented by scripts/recover.sh</text>
+  <rect x="30" y="28" width="1140" height="484" rx="36" fill="url(#board)" stroke="url(#edge)" stroke-width="2"/>
+  <path d="M64 88c160-70 390-82 566-32 48 14 92 32 142 38 128 16 242-26 370-22v64c-138-16-262 27-398 16-48-4-92-17-138-31-166-50-374-36-542 12Z" fill="#ffffff" opacity="0.04"/>
 
-  <path d="M160 292H1018" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
-
-  <g transform="translate(62 164)">
-    <rect width="188" height="176" rx="8" fill="#ffffff" stroke="#dbe2ea"/>
-    <circle cx="36" cy="38" r="16" fill="#0f766e"/>
-    <text x="36" y="44" text-anchor="middle" font-family="'SFMono-Regular', Consolas, monospace" font-size="18" font-weight="700" fill="#ffffff">0</text>
-    <text x="24" y="78" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#0f172a">Freeze state</text>
-    <text x="24" y="108" font-family="'SFMono-Regular', Consolas, monospace" font-size="13" fill="#475569">quit Messages.app</text>
-    <text x="24" y="132" font-family="'SFMono-Regular', Consolas, monospace" font-size="13" fill="#475569">copy chat.db family</text>
-    <rect x="24" y="150" width="140" height="4" rx="2" fill="#2dd4bf"/>
+  <g transform="translate(70 66)">
+    <rect x="0" y="0" width="162" height="30" rx="15" fill="#0c1320" stroke="#334155"/>
+    <circle cx="22" cy="15" r="5" fill="#2dd4bf"/>
+    <text x="36" y="20" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="700" fill="#e2e8f0">scripts/recover.sh</text>
+    <text x="0" y="56" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="34" font-weight="700" fill="#f8fafc">Recovery workflow</text>
+    <text x="0" y="84" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="16" fill="#b8c4d6">Snapshot first, confirm the retraction, scan WAL frames, then validate and archive the best candidate.</text>
   </g>
 
-  <g transform="translate(284 164)">
-    <rect width="188" height="176" rx="8" fill="#ffffff" stroke="#dbe2ea"/>
-    <circle cx="36" cy="38" r="16" fill="#1d4ed8"/>
-    <text x="36" y="44" text-anchor="middle" font-family="'SFMono-Regular', Consolas, monospace" font-size="18" font-weight="700" fill="#ffffff">1</text>
-    <text x="24" y="78" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#0f172a">Locate row</text>
-    <text x="24" y="108" font-family="'SFMono-Regular', Consolas, monospace" font-size="13" fill="#475569">--handle maps chat</text>
-    <text x="24" y="132" font-family="'SFMono-Regular', Consolas, monospace" font-size="13" fill="#475569">date_edited != 0</text>
-    <rect x="24" y="150" width="140" height="4" rx="2" fill="#60a5fa"/>
+  <line x1="228" y1="285" x2="972" y2="285" stroke="#607188" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <g transform="translate(72 182)">
+    <rect x="0" y="0" width="160" height="188" rx="24" fill="url(#card)" stroke="#415167" stroke-width="2"/>
+    <rect x="18" y="16" width="34" height="24" rx="12" fill="#0b1320" stroke="#334155"/>
+    <text x="30" y="33" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="13" font-weight="700" fill="#e2e8f0">01</text>
+    <rect x="18" y="54" width="42" height="42" rx="14" fill="#0b1320" stroke="#355166"/>
+    <rect x="26" y="64" width="18" height="14" rx="3" fill="none" stroke="#8bf7ff" stroke-width="3"/>
+    <rect x="32" y="72" width="18" height="14" rx="3" fill="none" stroke="#2dd4bf" stroke-width="3"/>
+    <text x="18" y="124" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="700" fill="#f8fafc">Snapshot</text>
+    <text x="18" y="145" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="700" fill="#f8fafc">Messages DB</text>
+    <text x="18" y="172" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="12" fill="#aab6c7">copy chat.db family</text>
+    <rect x="18" y="182" width="124" height="4" rx="2" fill="url(#accent)"/>
   </g>
 
-  <g transform="translate(506 164)">
-    <rect width="188" height="176" rx="8" fill="#ffffff" stroke="#dbe2ea"/>
-    <circle cx="36" cy="38" r="16" fill="#7c3aed"/>
-    <text x="36" y="44" text-anchor="middle" font-family="'SFMono-Regular', Consolas, monospace" font-size="18" font-weight="700" fill="#ffffff">2</text>
-    <text x="24" y="78" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#0f172a">Decode BLOBs</text>
-    <text x="24" y="108" font-family="'SFMono-Regular', Consolas, monospace" font-size="13" fill="#475569">msi.bin to msi.xml</text>
-    <text x="24" y="132" font-family="'SFMono-Regular', Consolas, monospace" font-size="13" fill="#475569">typedstream optional</text>
-    <rect x="24" y="150" width="140" height="4" rx="2" fill="#a78bfa"/>
+  <g transform="translate(250 182)">
+    <rect x="0" y="0" width="160" height="188" rx="24" fill="url(#card)" stroke="#415167" stroke-width="2"/>
+    <rect x="18" y="16" width="34" height="24" rx="12" fill="#0b1320" stroke="#334155"/>
+    <text x="30" y="33" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="13" font-weight="700" fill="#e2e8f0">02</text>
+    <rect x="18" y="54" width="42" height="42" rx="14" fill="#0b1320" stroke="#355166"/>
+    <circle cx="35" cy="72" r="10" fill="none" stroke="#8bf7ff" stroke-width="3"/>
+    <path d="M43 80 50 87" stroke="#8bf7ff" stroke-width="3" stroke-linecap="round"/>
+    <path d="M28 69h14M28 76h10" stroke="#607188" stroke-width="3" stroke-linecap="round"/>
+    <text x="18" y="124" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="700" fill="#f8fafc">Find retracted</text>
+    <text x="18" y="145" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="700" fill="#f8fafc">row</text>
+    <text x="18" y="172" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="12" fill="#aab6c7">date_edited + is_empty</text>
+    <rect x="18" y="182" width="124" height="4" rx="2" fill="url(#accent)"/>
   </g>
 
-  <g transform="translate(728 164)">
-    <rect width="188" height="176" rx="8" fill="#ffffff" stroke="#dbe2ea"/>
-    <circle cx="36" cy="38" r="16" fill="#b45309"/>
-    <text x="36" y="44" text-anchor="middle" font-family="'SFMono-Regular', Consolas, monospace" font-size="18" font-weight="700" fill="#ffffff">3</text>
-    <text x="24" y="78" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#0f172a">Scan WAL</text>
-    <text x="24" y="108" font-family="'SFMono-Regular', Consolas, monospace" font-size="13" fill="#475569">GUID byte hits</text>
-    <text x="24" y="132" font-family="'SFMono-Regular', Consolas, monospace" font-size="13" fill="#475569">extract UTF-8 text</text>
-    <rect x="24" y="150" width="140" height="4" rx="2" fill="#f59e0b"/>
+  <g transform="translate(428 182)">
+    <rect x="0" y="0" width="160" height="188" rx="24" fill="url(#card)" stroke="#415167" stroke-width="2"/>
+    <rect x="18" y="16" width="34" height="24" rx="12" fill="#0b1320" stroke="#334155"/>
+    <text x="30" y="33" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="13" font-weight="700" fill="#e2e8f0">03</text>
+    <rect x="18" y="54" width="42" height="42" rx="14" fill="#0b1320" stroke="#355166"/>
+    <path d="M30 64h18v22H30z" fill="none" stroke="#8bf7ff" stroke-width="3"/>
+    <path d="M34 72h10M34 80h14" stroke="#8bf7ff" stroke-width="3" stroke-linecap="round"/>
+    <text x="18" y="124" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="700" fill="#f8fafc">Read</text>
+    <text x="18" y="145" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="700" fill="#f8fafc">metadata</text>
+    <text x="18" y="172" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="12" fill="#aab6c7">rp / otr / ust</text>
+    <rect x="18" y="182" width="124" height="4" rx="2" fill="url(#accent)"/>
   </g>
 
-  <g transform="translate(950 164)">
-    <rect width="188" height="176" rx="8" fill="#ffffff" stroke="#dbe2ea"/>
-    <circle cx="36" cy="38" r="16" fill="#be123c"/>
-    <text x="36" y="44" text-anchor="middle" font-family="'SFMono-Regular', Consolas, monospace" font-size="18" font-weight="700" fill="#ffffff">4</text>
-    <text x="24" y="78" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#0f172a">Cross-check</text>
-    <text x="24" y="108" font-family="'SFMono-Regular', Consolas, monospace" font-size="13" fill="#475569">length matches otr</text>
-    <text x="24" y="132" font-family="'SFMono-Regular', Consolas, monospace" font-size="13" fill="#475569">exporter if present</text>
-    <rect x="24" y="150" width="140" height="4" rx="2" fill="#fb7185"/>
+  <g transform="translate(606 182)">
+    <rect x="0" y="0" width="160" height="188" rx="24" fill="url(#card)" stroke="#415167" stroke-width="2"/>
+    <rect x="18" y="16" width="34" height="24" rx="12" fill="#0b1320" stroke="#334155"/>
+    <text x="30" y="33" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="13" font-weight="700" fill="#e2e8f0">04</text>
+    <rect x="18" y="54" width="42" height="42" rx="14" fill="#0b1320" stroke="#355166"/>
+    <rect x="26" y="64" width="20" height="14" rx="3" fill="none" stroke="#607188" stroke-width="3"/>
+    <rect x="30" y="70" width="20" height="14" rx="3" fill="none" stroke="#8bf7ff" stroke-width="3"/>
+    <text x="18" y="124" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="700" fill="#f8fafc">Scan WAL</text>
+    <text x="18" y="145" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="700" fill="#f8fafc">frames</text>
+    <text x="18" y="172" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="12" fill="#aab6c7">GUID-adjacent bytes</text>
+    <rect x="18" y="182" width="124" height="4" rx="2" fill="url(#accent)"/>
   </g>
 
-  <rect x="176" y="398" width="848" height="58" rx="8" fill="#0f172a"/>
-  <rect x="176" y="398" width="848" height="5" fill="url(#accent)"/>
-  <text x="206" y="434" font-family="'SFMono-Regular', Consolas, monospace" font-size="16" fill="#e5e7eb">Output: report.txt, candidates.tsv, msi.xml, ab.bin, wal-hits.txt</text>
+  <g transform="translate(784 182)">
+    <rect x="0" y="0" width="160" height="188" rx="24" fill="url(#card)" stroke="#415167" stroke-width="2"/>
+    <rect x="18" y="16" width="34" height="24" rx="12" fill="#0b1320" stroke="#334155"/>
+    <text x="30" y="33" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="13" font-weight="700" fill="#e2e8f0">05</text>
+    <rect x="18" y="54" width="42" height="42" rx="14" fill="#0b1320" stroke="#355166"/>
+    <path d="M28 66h16c8 0 14 6 14 14v7c0 8-6 14-14 14H35l-7 6v-6h-2c-8 0-14-6-14-14v-7c0-8 6-14 14-14Z" fill="none" stroke="#2dd4bf" stroke-width="3"/>
+    <path d="M32 76h16M32 84h20" stroke="#8bf7ff" stroke-width="3" stroke-linecap="round"/>
+    <text x="18" y="124" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="700" fill="#f8fafc">Recover</text>
+    <text x="18" y="145" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="700" fill="#f8fafc">candidate text</text>
+    <text x="18" y="172" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="12" fill="#aab6c7">UTF-8 line candidates</text>
+    <rect x="18" y="182" width="124" height="4" rx="2" fill="url(#accent)"/>
+  </g>
+
+  <g transform="translate(962 182)">
+    <rect x="0" y="0" width="160" height="188" rx="24" fill="url(#card)" stroke="#415167" stroke-width="2"/>
+    <rect x="18" y="16" width="34" height="24" rx="12" fill="#0b1320" stroke="#334155"/>
+    <text x="30" y="33" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="13" font-weight="700" fill="#e2e8f0">06</text>
+    <rect x="18" y="54" width="42" height="42" rx="14" fill="#0b1320" stroke="#355166"/>
+    <path d="M27 85h22v10H27z" fill="none" stroke="#607188" stroke-width="3"/>
+    <circle cx="43" cy="68" r="9" fill="none" stroke="#2dd4bf" stroke-width="3"/>
+    <path d="M39 68 42 71 47 64" stroke="#8bf7ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="18" y="124" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="700" fill="#f8fafc">Cross-check</text>
+    <text x="18" y="145" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="700" fill="#f8fafc">/ archive</text>
+    <text x="18" y="172" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="12" fill="#aab6c7">length match + archive</text>
+    <rect x="18" y="182" width="124" height="4" rx="2" fill="url(#accent)"/>
+  </g>
+
+  <rect x="70" y="432" width="1060" height="48" rx="18" fill="#0c1320" stroke="#334155"/>
+  <text x="100" y="462" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="15" fill="#dbe4ee">Outputs: report.txt, candidates.tsv, msi.xml, ab.bin, wal-hits.txt</text>
 </svg>
