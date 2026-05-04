@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 import XCTest
 @testable import IMUCore
 
@@ -85,6 +86,38 @@ final class RecoveryNotifierTests: XCTestCase {
     XCTAssertEqual(delays, [0.5, 1.0, 2.0])
   }
 
+  func testUserNotificationPosterSkipsSilentlyWhenAuthorizationDenied() {
+    let probe = StubAuthorizationProbe(.denied)
+    let poster = UserNotificationPoster(authorizationProbe: probe)
+    let notification = RecoveryNotification(
+      title: "Message unsent",
+      body: "preview",
+      archiveURL: URL(fileURLWithPath: "/tmp/imu-test-archive"),
+      targetURL: URL(string: "imu://archive/tmp/imu-test-archive")!,
+      recoveryJSON: Data()
+    )
+
+    poster.post(notification)
+
+    XCTAssertEqual(probe.callCount, 1)
+  }
+
+  func testUserNotificationPosterSkipsSilentlyWhenAuthorizationNotDetermined() {
+    let probe = StubAuthorizationProbe(.notDetermined)
+    let poster = UserNotificationPoster(authorizationProbe: probe)
+    let notification = RecoveryNotification(
+      title: "Message unsent",
+      body: "preview",
+      archiveURL: URL(fileURLWithPath: "/tmp/imu-test-archive"),
+      targetURL: URL(string: "imu://archive/tmp/imu-test-archive")!,
+      recoveryJSON: Data()
+    )
+
+    poster.post(notification)
+
+    XCTAssertEqual(probe.callCount, 1)
+  }
+
   func testRecoveryNotifierPostsNativeNotificationAndWebhook() throws {
     let archive = try makeArchive(
       handle: "+15550001000",
@@ -161,5 +194,19 @@ private final class RecordingPoster: NativeNotificationPosting {
 
   func post(_ notification: RecoveryNotification) {
     notifications.append(notification)
+  }
+}
+
+private final class StubAuthorizationProbe: NotificationAuthorizationProbing {
+  let status: UNAuthorizationStatus
+  private(set) var callCount = 0
+
+  init(_ status: UNAuthorizationStatus) {
+    self.status = status
+  }
+
+  func getAuthorizationStatus(completion: @escaping (UNAuthorizationStatus) -> Void) {
+    callCount += 1
+    completion(status)
   }
 }

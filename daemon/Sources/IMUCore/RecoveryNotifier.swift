@@ -109,13 +109,37 @@ public protocol NativeNotificationPosting {
   func post(_ notification: RecoveryNotification)
 }
 
-public final class UserNotificationPoster: NativeNotificationPosting {
+// Reads the current notification authorization status. Injected so tests
+// can exercise the unauthorized-skip path without touching UN APIs (which
+// raise NSException from non-bundled CLI processes).
+public protocol NotificationAuthorizationProbing {
+  func getAuthorizationStatus(completion: @escaping (UNAuthorizationStatus) -> Void)
+}
+
+public final class SystemNotificationAuthorizationProbe: NotificationAuthorizationProbing {
   public init() {}
 
+  public func getAuthorizationStatus(completion: @escaping (UNAuthorizationStatus) -> Void) {
+    UNUserNotificationCenter.current().getNotificationSettings { settings in
+      completion(settings.authorizationStatus)
+    }
+  }
+}
+
+public final class UserNotificationPoster: NativeNotificationPosting {
+  private let authorizationProbe: NotificationAuthorizationProbing
+
+  public init(authorizationProbe: NotificationAuthorizationProbing = SystemNotificationAuthorizationProbe()) {
+    self.authorizationProbe = authorizationProbe
+  }
+
   public func post(_ notification: RecoveryNotification) {
-    let center = UNUserNotificationCenter.current()
-    center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-      guard granted else {
+    // UNUserNotificationCenter.requestAuthorization raises an uncaught
+    // NSInternalInconsistencyException from non-bundled CLI binaries (the
+    // daemon is one), which crashes the process. Query notificationSettings
+    // first — that's a safe read — and post only when already authorized.
+    authorizationProbe.getAuthorizationStatus { status in
+      guard status == .authorized || status == .provisional else {
         return
       }
 
@@ -132,7 +156,7 @@ public final class UserNotificationPoster: NativeNotificationPosting {
         content: content,
         trigger: nil
       )
-      center.add(request)
+      UNUserNotificationCenter.current().add(request)
     }
   }
 }
