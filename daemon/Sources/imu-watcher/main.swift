@@ -131,9 +131,6 @@ final class WatcherDaemon {
           }
           let complete = try archivePipeline.archive(event: event)
           log("recovery complete archive_dir=\(complete.archiveDir.path) recovered=\(complete.recovered)")
-          notifier?.notify(complete)
-          statusBoard.recordRecovery()
-          processedEvents.append(event)
           do {
             if complete.recovered {
               try detector.markRecovered(guid: event.guid)
@@ -143,10 +140,13 @@ final class WatcherDaemon {
           } catch {
             log("dedup state save failed guid=\(event.guid) error=\(error.localizedDescription)")
           }
+          notifier?.notify(complete)
+          statusBoard.recordRecovery()
+          processedEvents.append(event)
         } catch {
           log("archive error rowid=\(event.rowid) error=\(error.localizedDescription)")
-          statusBoard.recordError(error.localizedDescription)
           try? detector.markFailed(guid: event.guid)
+          statusBoard.recordError(error.localizedDescription)
         }
       }
       try detector.markProcessed(processedEvents)
