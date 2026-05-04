@@ -73,6 +73,137 @@ final class RetractionDetectorTests: XCTestCase {
     XCTAssertEqual(events.last?.editedAt, 1)
   }
 
+  func testDetectFiltersGUIDsAfterMarkRecovered() throws {
+    let fixture = try makeDetectorFixture()
+    defer {
+      try? FileManager.default.removeItem(at: fixture.directory)
+    }
+
+    try insertRetraction(
+      into: fixture.chatDBURL,
+      guid: "synthetic-guid-recovered",
+      handleID: 1,
+      dateEdited: 1_000
+    )
+
+    let detector = try RetractionDetector(
+      chatDBURL: fixture.chatDBURL,
+      stateStore: DetectorStateStore(url: fixture.stateURL)
+    )
+    let firstPass = try detector.detect()
+    XCTAssertEqual(firstPass.count, 1)
+
+    try detector.markRecovered(guid: "synthetic-guid-recovered")
+
+    XCTAssertEqual(try detector.detect(), [])
+    let persisted = try DetectorStateStore(url: fixture.stateURL).load()
+    XCTAssertEqual(persisted.processedGUIDs, ["synthetic-guid-recovered"])
+    XCTAssertEqual(persisted.attemptCounts, [:])
+  }
+
+  func testDetectStillReturnsGUIDBelowMaxFailedAttempts() throws {
+    let fixture = try makeDetectorFixture()
+    defer {
+      try? FileManager.default.removeItem(at: fixture.directory)
+    }
+
+    try insertRetraction(
+      into: fixture.chatDBURL,
+      guid: "synthetic-guid-flaky",
+      handleID: 1,
+      dateEdited: 1_000
+    )
+
+    let detector = try RetractionDetector(
+      chatDBURL: fixture.chatDBURL,
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      maxAttempts: 3
+    )
+    XCTAssertEqual(try detector.detect().count, 1)
+
+    try detector.markFailed(guid: "synthetic-guid-flaky")
+    XCTAssertEqual(try detector.detect().count, 1)
+
+    try detector.markFailed(guid: "synthetic-guid-flaky")
+    XCTAssertEqual(try detector.detect().count, 1)
+
+    XCTAssertEqual(detector.currentState().attemptCounts, ["synthetic-guid-flaky": 2])
+  }
+
+  func testDetectFiltersGUIDAfterReachingMaxFailedAttempts() throws {
+    let fixture = try makeDetectorFixture()
+    defer {
+      try? FileManager.default.removeItem(at: fixture.directory)
+    }
+
+    try insertRetraction(
+      into: fixture.chatDBURL,
+      guid: "synthetic-guid-doomed",
+      handleID: 1,
+      dateEdited: 1_000
+    )
+
+    let detector = try RetractionDetector(
+      chatDBURL: fixture.chatDBURL,
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      maxAttempts: 3
+    )
+
+    try detector.markFailed(guid: "synthetic-guid-doomed")
+    try detector.markFailed(guid: "synthetic-guid-doomed")
+    try detector.markFailed(guid: "synthetic-guid-doomed")
+
+    XCTAssertEqual(try detector.detect(), [])
+    let persisted = try DetectorStateStore(url: fixture.stateURL).load()
+    XCTAssertEqual(persisted.processedGUIDs, ["synthetic-guid-doomed"])
+    XCTAssertNil(persisted.attemptCounts["synthetic-guid-doomed"])
+  }
+
+  func testMarkRecoveredClearsPriorFailedAttemptCount() throws {
+    let fixture = try makeDetectorFixture()
+    defer {
+      try? FileManager.default.removeItem(at: fixture.directory)
+    }
+
+    try insertRetraction(
+      into: fixture.chatDBURL,
+      guid: "synthetic-guid-late-success",
+      handleID: 1,
+      dateEdited: 1_000
+    )
+
+    let detector = try RetractionDetector(
+      chatDBURL: fixture.chatDBURL,
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      maxAttempts: 3
+    )
+
+    try detector.markFailed(guid: "synthetic-guid-late-success")
+    try detector.markFailed(guid: "synthetic-guid-late-success")
+    XCTAssertEqual(detector.currentState().attemptCounts["synthetic-guid-late-success"], 2)
+
+    try detector.markRecovered(guid: "synthetic-guid-late-success")
+    let persisted = try DetectorStateStore(url: fixture.stateURL).load()
+    XCTAssertEqual(persisted.processedGUIDs, ["synthetic-guid-late-success"])
+    XCTAssertEqual(persisted.attemptCounts, [:])
+  }
+
+  func testStateStoreLoadsLegacyJSONWithoutNewFields() throws {
+    let directory = try makeTemporaryDirectory()
+    defer {
+      try? FileManager.default.removeItem(at: directory)
+    }
+
+    let stateURL = directory.appendingPathComponent("state.json", isDirectory: false)
+    let legacy = #"{"last_seen_date_edited": 7777}"#
+    try legacy.write(to: stateURL, atomically: true, encoding: .utf8)
+
+    let loaded = try DetectorStateStore(url: stateURL).load()
+    XCTAssertEqual(loaded.lastSeenDateEdited, 7777)
+    XCTAssertEqual(loaded.processedGUIDs, [])
+    XCTAssertEqual(loaded.attemptCounts, [:])
+  }
+
   func testWatcherToDetectorLatencyIsUnderFiveHundredMilliseconds() throws {
     let fixture = try makeDetectorFixture()
     defer {

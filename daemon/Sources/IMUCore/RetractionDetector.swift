@@ -17,13 +17,30 @@ public struct RetractionDetected: Equatable {
 
 public struct DetectorState: Codable, Equatable {
   public var lastSeenDateEdited: Int64
+  public var processedGUIDs: [String]
+  public var attemptCounts: [String: Int]
 
-  public init(lastSeenDateEdited: Int64 = 0) {
+  public init(
+    lastSeenDateEdited: Int64 = 0,
+    processedGUIDs: [String] = [],
+    attemptCounts: [String: Int] = [:]
+  ) {
     self.lastSeenDateEdited = lastSeenDateEdited
+    self.processedGUIDs = processedGUIDs
+    self.attemptCounts = attemptCounts
   }
 
   enum CodingKeys: String, CodingKey {
     case lastSeenDateEdited = "last_seen_date_edited"
+    case processedGUIDs = "processed_guids"
+    case attemptCounts = "attempt_counts"
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.lastSeenDateEdited = try container.decode(Int64.self, forKey: .lastSeenDateEdited)
+    self.processedGUIDs = try container.decodeIfPresent([String].self, forKey: .processedGUIDs) ?? []
+    self.attemptCounts = try container.decodeIfPresent([String: Int].self, forKey: .attemptCounts) ?? [:]
   }
 }
 
@@ -75,16 +92,21 @@ public enum RetractionDetectorError: Error, LocalizedError {
 }
 
 public final class RetractionDetector {
+  public static let defaultMaxAttempts = 3
+
   private let chatDBURL: URL
   private let stateStore: DetectorStateStore
+  private let maxAttempts: Int
   private var state: DetectorState
 
   public init(
     chatDBURL: URL = defaultMessagesChatDBURL(),
-    stateStore: DetectorStateStore = DetectorStateStore()
+    stateStore: DetectorStateStore = DetectorStateStore(),
+    maxAttempts: Int = RetractionDetector.defaultMaxAttempts
   ) throws {
     self.chatDBURL = chatDBURL
     self.stateStore = stateStore
+    self.maxAttempts = maxAttempts
     self.state = try stateStore.load()
   }
 
@@ -103,7 +125,9 @@ public final class RetractionDetector {
       sqlite3_close(database)
     }
 
-    return try queryRetractions(database: database, after: state.lastSeenDateEdited)
+    let candidates = try queryRetractions(database: database, after: state.lastSeenDateEdited)
+    let processed = Set(state.processedGUIDs)
+    return candidates.filter { !processed.contains($0.guid) }
   }
 
   public func markProcessed(_ events: [RetractionDetected]) throws {
@@ -112,6 +136,35 @@ public final class RetractionDetector {
     }
 
     state.lastSeenDateEdited = maxEditedAt
+    try stateStore.save(state)
+  }
+
+  public func markRecovered(guid: String) throws {
+    var changed = false
+    if !state.processedGUIDs.contains(guid) {
+      state.processedGUIDs.append(guid)
+      state.processedGUIDs.sort()
+      changed = true
+    }
+    if state.attemptCounts.removeValue(forKey: guid) != nil {
+      changed = true
+    }
+    if changed {
+      try stateStore.save(state)
+    }
+  }
+
+  public func markFailed(guid: String) throws {
+    let nextCount = (state.attemptCounts[guid] ?? 0) + 1
+    if nextCount >= maxAttempts {
+      if !state.processedGUIDs.contains(guid) {
+        state.processedGUIDs.append(guid)
+        state.processedGUIDs.sort()
+      }
+      state.attemptCounts.removeValue(forKey: guid)
+    } else {
+      state.attemptCounts[guid] = nextCount
+    }
     try stateStore.save(state)
   }
 
