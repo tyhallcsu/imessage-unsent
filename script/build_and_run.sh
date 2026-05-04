@@ -30,6 +30,15 @@ cp "$PACKAGE_DIR/Info.plist" "$INFO_PLIST"
 bash "$ROOT_DIR/scripts/build-app-icon.sh"
 cp "$ROOT_DIR/gui/.build/icon/AppIcon.icns" "$APP_CONTENTS/Resources/AppIcon.icns"
 
+# Ad-hoc codesign so the bundle has a stable code identity bound to its
+# Info.plist. Without this, macOS treats each rebuild as a new app and will
+# not register the bundle for Notifications / Contacts / etc., which makes
+# requestAuthorization silently no-op. The signature is ad-hoc (no Developer
+# ID) so Gatekeeper still warns on first launch — clear with `xattr -dr
+# com.apple.quarantine "$APP_BUNDLE"` if needed.
+codesign --force --sign - --timestamp=none "$APP_BINARY"
+codesign --force --sign - --timestamp=none "$APP_BUNDLE"
+
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
 }

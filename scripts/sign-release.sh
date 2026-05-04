@@ -57,8 +57,19 @@ missing_signing=()
 [[ -z "${APPLE_TEAM_ID:-}" ]]                    && missing_signing+=("APPLE_TEAM_ID")
 
 if [[ ${#missing_signing[@]} -gt 0 ]]; then
-  log "Skipping codesign + notarize: missing env vars (${missing_signing[*]})."
-  log "Artifacts will be UNSIGNED. See docs/code-signing.md to provision."
+  log "No Developer ID env vars (${missing_signing[*]}); ad-hoc signing instead."
+  log "Ad-hoc signing produces a stable code identity so macOS registers the app for"
+  log "Notifications/Contacts/etc., but does NOT pass Gatekeeper without manual approval."
+  log "See docs/code-signing.md for the Developer ID flow that produces notarized builds."
+  # The .app bundle: --force overwrites the linker-signed signature; binding the
+  # Info.plist into the seal is what fixes the notification-prompt issue (#94)
+  # where unbound Info.plist caused requestAuthorization to silently no-op.
+  codesign --force --sign - --timestamp=none "$APP_PATH/Contents/MacOS/IMUMenuBar"
+  codesign --force --sign - --timestamp=none "$APP_PATH"
+  # The daemon binary is a CLI Mach-O; ad-hoc sign for the same reason.
+  codesign --force --sign - --timestamp=none "$DAEMON_BIN"
+  log "Ad-hoc signed: $APP_PATH"
+  log "Ad-hoc signed: $DAEMON_BIN"
   exit 0
 fi
 
