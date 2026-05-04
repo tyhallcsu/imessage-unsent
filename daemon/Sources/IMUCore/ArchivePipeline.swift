@@ -254,6 +254,8 @@ public struct ArchiveManifest: Codable, Equatable {
   public let snapshotFinishedAt: String
   public let snapFiles: [String: ArchiveSnapFile]
   public var recovery: ArchiveRecovery?
+  public var compactionState: String?
+  public var compactedAt: String?
 
   enum CodingKeys: String, CodingKey {
     case detectedAt = "detected_at"
@@ -265,6 +267,8 @@ public struct ArchiveManifest: Codable, Equatable {
     case snapshotFinishedAt = "snapshot_finished_at"
     case snapFiles = "snap_files"
     case recovery
+    case compactionState = "compaction_state"
+    case compactedAt = "compacted_at"
   }
 
   public init(
@@ -276,7 +280,9 @@ public struct ArchiveManifest: Codable, Equatable {
     snapshotStartedAt: String,
     snapshotFinishedAt: String,
     snapFiles: [String: ArchiveSnapFile],
-    recovery: ArchiveRecovery?
+    recovery: ArchiveRecovery?,
+    compactionState: String? = nil,
+    compactedAt: String? = nil
   ) {
     self.detectedAt = detectedAt
     self.rowid = rowid
@@ -287,6 +293,23 @@ public struct ArchiveManifest: Codable, Equatable {
     self.snapshotFinishedAt = snapshotFinishedAt
     self.snapFiles = snapFiles
     self.recovery = recovery
+    self.compactionState = compactionState
+    self.compactedAt = compactedAt
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.detectedAt = try container.decode(String.self, forKey: .detectedAt)
+    self.rowid = try container.decode(Int64.self, forKey: .rowid)
+    self.guid = try container.decode(String.self, forKey: .guid)
+    self.handle = try container.decode(String.self, forKey: .handle)
+    self.editedAt = try container.decode(Int64.self, forKey: .editedAt)
+    self.snapshotStartedAt = try container.decode(String.self, forKey: .snapshotStartedAt)
+    self.snapshotFinishedAt = try container.decode(String.self, forKey: .snapshotFinishedAt)
+    self.snapFiles = try container.decode([String: ArchiveSnapFile].self, forKey: .snapFiles)
+    self.recovery = try container.decodeIfPresent(ArchiveRecovery.self, forKey: .recovery)
+    self.compactionState = try container.decodeIfPresent(String.self, forKey: .compactionState)
+    self.compactedAt = try container.decodeIfPresent(String.self, forKey: .compactedAt)
   }
 }
 

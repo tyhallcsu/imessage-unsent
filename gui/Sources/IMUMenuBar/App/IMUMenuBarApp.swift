@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import IMUMenuBarCore
 import SwiftUI
+import UserNotifications
 
 @main
 struct IMUMenuBarApp: App {
@@ -17,11 +18,24 @@ struct IMUMenuBarApp: App {
   )
   @Environment(\.openWindow) private var openWindow
 
+  /// GUI-side recovery watcher (issue #94). Polls the archives directory and
+  /// posts notifications for new `recovered=true` archives. Held by the
+  /// AppDelegate so its lifetime equals the app.
+  private static let archivesDir = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library", isDirectory: true)
+    .appendingPathComponent("Application Support", isDirectory: true)
+    .appendingPathComponent("imessage-unsent", isDirectory: true)
+    .appendingPathComponent("archives", isDirectory: true)
+
   var body: some Scene {
     MenuBarExtra {
       MenuBarContentView(model: model)
         .onAppear {
           model.start()
+          appDelegate.startRecoveryWatcher(
+            archivesDir: Self.archivesDir,
+            isEnabled: { [weak settingsModel] in settingsModel?.draft.notifications.show ?? true }
+          )
         }
         .onReceive(URLRouter.shared.publisher) { route in
           handle(route: route)
@@ -76,11 +90,46 @@ struct IMUMenuBarApp: App {
   }
 }
 
-final class IMUAppDelegate: NSObject, NSApplicationDelegate {
+final class IMUAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+  private var recoveryWatcher: RecoveryWatcher?
+
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    UNUserNotificationCenter.current().delegate = self
+  }
+
+  func startRecoveryWatcher(archivesDir: URL, isEnabled: @escaping () -> Bool) {
+    guard recoveryWatcher == nil else { return }
+    let watcher = RecoveryWatcher(
+      archivesDir: archivesDir,
+      isEnabled: isEnabled,
+      notifier: defaultRecoveryNotifier
+    )
+    watcher.start()
+    recoveryWatcher = watcher
+  }
+
   func application(_ application: NSApplication, open urls: [URL]) {
     for url in urls {
       URLRouter.shared.publish(routeIMUURL(url))
     }
+  }
+
+  /// Show banners while the app is foregrounded; clicking routes to history.
+  func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
+    completionHandler([.banner, .sound])
+  }
+
+  func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    didReceive response: UNNotificationResponse,
+    withCompletionHandler completionHandler: @escaping () -> Void
+  ) {
+    URLRouter.shared.publish(.history)
+    completionHandler()
   }
 }
 

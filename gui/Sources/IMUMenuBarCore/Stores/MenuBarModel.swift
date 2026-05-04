@@ -17,6 +17,29 @@ public struct NoArchiveDeleter: ArchiveDeleting {
   public func deleteArchive(id _: String) -> Bool { false }
 }
 
+public protocol ArchiveCompacting {
+  func compactArchive(id: String) -> CompactResult
+}
+
+public struct NoArchiveCompactor: ArchiveCompacting {
+  public init() {}
+  public func compactArchive(id _: String) -> CompactResult {
+    CompactResult(ok: false, errorMessage: "no compactor configured")
+  }
+}
+
+public struct DaemonArchiveCompactor: ArchiveCompacting {
+  private let client: DaemonControlClienting
+
+  public init(client: DaemonControlClienting) {
+    self.client = client
+  }
+
+  public func compactArchive(id: String) -> CompactResult {
+    client.compact(id: id)
+  }
+}
+
 @MainActor
 public final class MenuBarModel: ObservableObject {
   @Published public private(set) var status: DaemonStatus = .idle
@@ -31,6 +54,7 @@ public final class MenuBarModel: ObservableObject {
   private let historyProvider: RecoveryHistoryProviding
   private let entryProvider: RecoveryEntryProviding
   private let archiveDeleter: ArchiveDeleting
+  private let archiveCompactor: ArchiveCompacting
   private let statusProvider: (() -> DaemonStatusInfo?)?
   private var timer: Timer?
 
@@ -39,6 +63,7 @@ public final class MenuBarModel: ObservableObject {
     historyProvider: RecoveryHistoryProviding = EmptyRecoveryHistoryProvider(),
     entryProvider: RecoveryEntryProviding = EmptyRecoveryEntryProvider(),
     archiveDeleter: ArchiveDeleting = NoArchiveDeleter(),
+    archiveCompactor: ArchiveCompacting = NoArchiveCompactor(),
     contactsResolver: ContactsResolving = NoContactsResolver(),
     statusProvider: (() -> DaemonStatusInfo?)? = nil
   ) {
@@ -46,6 +71,7 @@ public final class MenuBarModel: ObservableObject {
     self.historyProvider = historyProvider
     self.entryProvider = entryProvider
     self.archiveDeleter = archiveDeleter
+    self.archiveCompactor = archiveCompactor
     self.contactsResolver = contactsResolver
     self.statusProvider = statusProvider
   }
@@ -57,6 +83,7 @@ public final class MenuBarModel: ObservableObject {
       historyProvider: DaemonHistoryProvider(client: client),
       entryProvider: DaemonRecoveryEntryProvider(client: client),
       archiveDeleter: DaemonArchiveDeleter(client: client),
+      archiveCompactor: DaemonArchiveCompactor(client: client),
       contactsResolver: CNContactsResolver(),
       statusProvider: { client.status() }
     )
@@ -111,6 +138,17 @@ public final class MenuBarModel: ObservableObject {
     guard archiveDeleter.deleteArchive(id: id) else { return false }
     refresh()
     return true
+  }
+
+  /// Compacts the archive via the daemon — drops chat.db family, keeps
+  /// recovered text + manifest. Returns the daemon's `CompactResult`.
+  @discardableResult
+  public func compact(id: String) -> CompactResult {
+    let result = archiveCompactor.compactArchive(id: id)
+    if result.ok {
+      refresh()
+    }
+    return result
   }
 
   private func mapState(_ raw: String) -> DaemonStatus {

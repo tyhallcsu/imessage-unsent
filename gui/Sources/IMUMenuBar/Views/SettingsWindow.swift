@@ -86,11 +86,25 @@ struct SettingsWindow: View {
 
       Spacer()
 
-      if model.statusInfo?.chatDBReadable == false {
+      Button {
+        model.refresh()
+      } label: {
+        Label("Recheck", systemImage: "arrow.clockwise")
+      }
+      .help("Re-fetch the daemon's chat.db probe. The daemon also re-probes automatically each minute.")
+
+      Button {
+        revealDaemonBinaryInFinder()
+      } label: {
+        Label("Reveal binary", systemImage: "magnifyingglass")
+      }
+      .help("Opens Finder at the imu-watcher binary so you can drag it into the Full Disk Access list.")
+
+      if model.statusInfo?.chatDBReadable != true {
         Button("Open Full Disk Access…") {
           openFullDiskAccessSettings()
         }
-        .help("Opens System Settings → Privacy & Security → Full Disk Access. Toggle imu-watcher off then back on to refresh the TCC grant after a rebuild.")
+        .help("Opens System Settings → Privacy & Security → Full Disk Access. After a rebuild macOS revokes the grant; drag the daemon binary in or toggle the existing entry off and back on.")
       }
     }
   }
@@ -98,6 +112,22 @@ struct SettingsWindow: View {
   private func openFullDiskAccessSettings() {
     if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles") {
       NSWorkspace.shared.open(url)
+    }
+  }
+
+  /// Opens Finder with the daemon binary selected so the user can drag it
+  /// straight into the Full Disk Access list — saves a manual cd dance.
+  private func revealDaemonBinaryInFinder() {
+    let binDir = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent("Library", isDirectory: true)
+      .appendingPathComponent("Application Support", isDirectory: true)
+      .appendingPathComponent("imessage-unsent", isDirectory: true)
+      .appendingPathComponent("bin", isDirectory: true)
+    let bin = binDir.appendingPathComponent("imu-watcher", isDirectory: false)
+    if FileManager.default.fileExists(atPath: bin.path) {
+      NSWorkspace.shared.activateFileViewerSelecting([bin])
+    } else {
+      NSWorkspace.shared.activateFileViewerSelecting([binDir])
     }
   }
 

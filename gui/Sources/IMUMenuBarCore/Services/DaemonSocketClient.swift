@@ -9,6 +9,19 @@ public protocol DaemonControlClienting: DaemonPinging {
   func status() -> DaemonStatusInfo?
   func recent(limit: Int) -> [ArchiveHistoryEntryDTO]
   func delete(id: String) -> Bool
+  func compact(id: String) -> CompactResult
+}
+
+public struct CompactResult: Equatable {
+  public let ok: Bool
+  public let bytesReclaimed: Int64
+  public let errorMessage: String?
+
+  public init(ok: Bool, bytesReclaimed: Int64 = 0, errorMessage: String? = nil) {
+    self.ok = ok
+    self.bytesReclaimed = bytesReclaimed
+    self.errorMessage = errorMessage
+  }
 }
 
 public protocol ArchiveDeleting {
@@ -63,6 +76,25 @@ public final class DaemonControlClient: DaemonControlClienting {
     let payload: [String: Any] = ["op": "delete", "id": id]
     guard let response = sendRequest(payload) else { return false }
     return (response["ok"] as? Bool) == true
+  }
+
+  public func compact(id: String) -> CompactResult {
+    guard !id.isEmpty else { return CompactResult(ok: false, errorMessage: "empty id") }
+    let payload: [String: Any] = ["op": "compact", "id": id]
+    guard let response = sendRequest(payload) else {
+      return CompactResult(ok: false, errorMessage: "no response from daemon")
+    }
+    if (response["ok"] as? Bool) == true {
+      let bytes = (response["bytes_reclaimed"] as? Int64) ?? Int64((response["bytes_reclaimed"] as? Int) ?? 0)
+      return CompactResult(ok: true, bytesReclaimed: bytes)
+    }
+    let message: String
+    if let err = response["error"] as? [String: Any], let m = err["message"] as? String {
+      message = m
+    } else {
+      message = "compact failed"
+    }
+    return CompactResult(ok: false, errorMessage: message)
   }
 
   private func sendRequest(_ payload: [String: Any]) -> [String: Any]? {

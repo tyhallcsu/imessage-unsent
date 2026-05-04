@@ -227,10 +227,12 @@ public final class ControlServer {
       return makeRecent(limit: limit)
     case "delete":
       return makeDelete(id: object["id"] as? String)
+    case "compact":
+      return makeCompact(id: object["id"] as? String)
     default:
       return makeError(
         code: "read_only",
-        message: "op \(op) is not permitted: control server only allows ping/status/recent/delete"
+        message: "op \(op) is not permitted: control server only allows ping/status/recent/delete/compact"
       )
     }
   }
@@ -270,7 +272,8 @@ public final class ControlServer {
         "recovered": entry.recovered,
         "text": entry.text as Any? ?? NSNull(),
         "error": entry.error as Any? ?? NSNull(),
-        "archive_path": entry.archivePath
+        "archive_path": entry.archivePath,
+        "compaction_state": entry.compactionState as Any? ?? NSNull()
       ]
     }
     return encodeJSON(["ok": true, "recoveries": recoveries])
@@ -299,6 +302,42 @@ public final class ControlServer {
       return makeError(code: "internal_error", message: "delete failed: \(error.localizedDescription)")
     }
     return encodeJSON(["ok": true, "deleted": id])
+  }
+
+  private func makeCompact(id: String?) -> Data {
+    guard let id, !id.isEmpty else {
+      return makeError(code: "bad_request", message: "missing or empty id")
+    }
+    let nsId = id as NSString
+    let isWellFormed = ArchiveHistoryReader.archiveDirectoryNamePattern.firstMatch(
+      in: id,
+      range: NSRange(location: 0, length: nsId.length)
+    ) != nil
+    guard isWellFormed else {
+      return makeError(code: "bad_request", message: "invalid archive id")
+    }
+    let target = historyReader.archivesDir.appendingPathComponent(id, isDirectory: true)
+    do {
+      let result = try ArchiveCompactor.compact(archiveDir: target)
+      logger?("compact ok id=\(id) bytes_reclaimed=\(result.bytesReclaimed) removed=\(result.removedFiles.count)")
+      return encodeJSON([
+        "ok": true,
+        "compacted": id,
+        "bytes_reclaimed": result.bytesReclaimed,
+        "removed_files": result.removedFiles
+      ])
+    } catch let error as ArchiveCompactionError {
+      let code: String
+      switch error {
+      case .archiveNotFound: code = "not_found"
+      case .alreadyCompacted: code = "already_compacted"
+      case .manifestUnreadable, .recoveryUnreadable: code = "bad_request"
+      case .writeFailed: code = "internal_error"
+      }
+      return makeError(code: code, message: error.localizedDescription)
+    } catch {
+      return makeError(code: "internal_error", message: "compact failed: \(error.localizedDescription)")
+    }
   }
 
   private func makeError(code: String, message: String) -> Data {
