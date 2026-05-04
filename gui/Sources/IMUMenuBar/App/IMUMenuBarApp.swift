@@ -10,6 +10,7 @@ struct IMUMenuBarApp: App {
   @StateObject private var model = MenuBarModel()
   @StateObject private var settingsModel = SettingsModel()
   @StateObject private var permissionModel = NotificationPermissionModel()
+  @StateObject private var pendingDeepLink = PendingDeepLink()
   @StateObject private var restartModel = DaemonRestartModel(
     restarter: DefaultDaemonRestarter(
       pinger: DaemonControlClient(),
@@ -46,7 +47,7 @@ struct IMUMenuBarApp: App {
     .menuBarExtraStyle(.menu)
 
     Window("Recovered Messages", id: "history") {
-      HistoryWindow(model: model)
+      HistoryWindow(model: model, pendingDeepLink: pendingDeepLink)
     }
     .handlesExternalEvents(matching: ["history"])
 
@@ -75,6 +76,9 @@ struct IMUMenuBarApp: App {
   private func handle(route: IMURoute) {
     switch route {
     case .history:
+      openWindow(id: "history")
+    case let .historyEntry(archiveId):
+      pendingDeepLink.archiveId = archiveId
       openWindow(id: "history")
     case .settings:
       openWindow(id: "settings")
@@ -128,7 +132,17 @@ final class IMUAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
     didReceive response: UNNotificationResponse,
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
-    URLRouter.shared.publish(.history)
+    // RecoveryWatcher stores the archive id under "archive_id" in userInfo.
+    // Route to the specific entry's detail when present so notification taps
+    // land users on the recovery they got the banner about; fall back to the
+    // history list when the id is missing (e.g. older notifications, or the
+    // bundled "N messages recovered" coalesced banner).
+    let userInfo = response.notification.request.content.userInfo
+    if let archiveId = userInfo["archive_id"] as? String, !archiveId.isEmpty {
+      URLRouter.shared.publish(.historyEntry(archiveId))
+    } else {
+      URLRouter.shared.publish(.history)
+    }
     completionHandler()
   }
 }

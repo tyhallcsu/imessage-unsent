@@ -12,6 +12,11 @@ struct HistoryWindow: View {
 
   @StateObject private var archiveStats = ArchiveStatsProviderObservable()
 
+  /// Archive id requested via `imu://history/<id>` deep link. Set by
+  /// `IMUMenuBarApp` via the `pendingArchiveId` shared box; on appear we
+  /// pop it and open the matching detail sheet.
+  @ObservedObject var pendingDeepLink: PendingDeepLink
+
   private let detailLoader: RecoveryDetailLoading = FileSystemRecoveryDetailLoader()
 
   var body: some View {
@@ -26,6 +31,15 @@ struct HistoryWindow: View {
     .onAppear {
       model.refresh()
       archiveStats.invalidateAll()
+      handlePendingDeepLinkIfAny()
+    }
+    .onChange(of: pendingDeepLink.archiveId) { _ in
+      handlePendingDeepLinkIfAny()
+    }
+    .onChange(of: model.recentEntries) { _ in
+      // Deep link may have arrived before `refresh()` populated the entries;
+      // re-try when the list lands.
+      handlePendingDeepLinkIfAny()
     }
     .sheet(item: $selectedEntry, onDismiss: {
       loadedDetail = nil
@@ -207,4 +221,29 @@ struct HistoryWindow: View {
     }
     selectedEntry = entry
   }
+
+  /// If `pendingDeepLink.archiveId` is set, find the matching entry in
+  /// `model.recentEntries` and open its detail. Clears the pending id so the
+  /// same link doesn't re-fire on the next state change.
+  private func handlePendingDeepLinkIfAny() {
+    guard let id = pendingDeepLink.archiveId else { return }
+    guard let entry = model.recentEntries.first(where: { $0.id == id }) else {
+      // Entry isn't loaded yet (deep link may have arrived before refresh()
+      // populated the list). Leave the id pending so onChange(recentEntries)
+      // can retry when the data lands.
+      return
+    }
+    pendingDeepLink.archiveId = nil
+    openDetail(for: entry)
+  }
+}
+
+/// Shared mailbox so external triggers (notification clicks, deep links) can
+/// hand a target archive id to the History window without taking a hard
+/// dependency on its lifecycle.
+@MainActor
+public final class PendingDeepLink: ObservableObject {
+  @Published public var archiveId: String?
+
+  public init() {}
 }
