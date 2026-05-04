@@ -10,6 +10,7 @@ public struct ArchiveHistoryEntry: Codable, Equatable {
   public let error: String?
   public let archivePath: String
   public let failureCategory: RecoveryFailureCategory?
+  public let compactionState: String?
 
   enum CodingKeys: String, CodingKey {
     case id
@@ -21,6 +22,7 @@ public struct ArchiveHistoryEntry: Codable, Equatable {
     case error
     case archivePath = "archive_path"
     case failureCategory = "failure_category"
+    case compactionState = "compaction_state"
   }
 
   public init(
@@ -32,7 +34,8 @@ public struct ArchiveHistoryEntry: Codable, Equatable {
     text: String?,
     error: String?,
     archivePath: String,
-    failureCategory: RecoveryFailureCategory? = nil
+    failureCategory: RecoveryFailureCategory? = nil,
+    compactionState: String? = nil
   ) {
     self.id = id
     self.detectedAt = detectedAt
@@ -43,6 +46,21 @@ public struct ArchiveHistoryEntry: Codable, Equatable {
     self.error = error
     self.archivePath = archivePath
     self.failureCategory = failureCategory
+    self.compactionState = compactionState
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    self.id = try c.decode(String.self, forKey: .id)
+    self.detectedAt = try c.decode(String.self, forKey: .detectedAt)
+    self.handle = try c.decode(String.self, forKey: .handle)
+    self.rowid = try c.decode(Int64.self, forKey: .rowid)
+    self.recovered = try c.decode(Bool.self, forKey: .recovered)
+    self.text = try c.decodeIfPresent(String.self, forKey: .text)
+    self.error = try c.decodeIfPresent(String.self, forKey: .error)
+    self.archivePath = try c.decode(String.self, forKey: .archivePath)
+    self.failureCategory = try c.decodeIfPresent(RecoveryFailureCategory.self, forKey: .failureCategory)
+    self.compactionState = try c.decodeIfPresent(String.self, forKey: .compactionState)
   }
 }
 
@@ -155,7 +173,8 @@ public struct ArchiveHistoryReader {
         text: text,
         error: error,
         archivePath: archiveDir.path,
-        failureCategory: failureCategory
+        failureCategory: failureCategory,
+        compactionState: manifest.compactionState
       )
     )
   }

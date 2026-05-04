@@ -10,7 +10,9 @@ struct RecoveryDetailView: View {
   let dismiss: () -> Void
 
   @State private var showingDeleteConfirmation = false
+  @State private var showingCompactConfirmation = false
   @State private var copyConfirmation: String?
+  @State private var compactStatus: String?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -37,14 +39,43 @@ struct RecoveryDetailView: View {
     } message: {
       Text("This permanently removes the archive directory and its snapshot files. The original chat.db is not touched.")
     }
+    .alert("Compact archive?", isPresented: $showingCompactConfirmation) {
+      Button("Cancel", role: .cancel) {}
+      Button("Compact", role: .destructive) {
+        let result = model.compact(id: entry.id)
+        if result.ok {
+          let mb = Double(result.bytesReclaimed) / 1_000_000
+          compactStatus = String(format: "Compacted — reclaimed %.1f MB", mb)
+        } else {
+          compactStatus = "Compact failed: \(result.errorMessage ?? "unknown error")"
+        }
+        Task { @MainActor in
+          try? await Task.sleep(nanoseconds: 2_500_000_000)
+          compactStatus = nil
+        }
+      }
+    } message: {
+      Text("This drops the chat.db snapshot files but keeps the recovered text and metadata. The recovered message will still appear in History; the underlying chat.db copy is gone forever.")
+    }
   }
 
   private var header: some View {
     HStack(alignment: .firstTextBaseline) {
       VStack(alignment: .leading, spacing: 2) {
-        Text(model.contactsResolver.displayName(forHandle: entry.handle) ?? entry.handle)
-          .font(.title3)
-          .fontWeight(.semibold)
+        HStack(spacing: 6) {
+          Text(model.contactsResolver.displayName(forHandle: entry.handle) ?? entry.handle)
+            .font(.title3)
+            .fontWeight(.semibold)
+          if entry.isCompacted {
+            Text("Compacted")
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+              .padding(.horizontal, 6)
+              .padding(.vertical, 2)
+              .background(RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(0.18)))
+              .help("Snapshot files dropped to reclaim disk space; recovered text retained.")
+          }
+        }
         Text(entry.handle)
           .font(.caption)
           .foregroundStyle(.secondary)
@@ -166,6 +197,10 @@ struct RecoveryDetailView: View {
         Label(confirmation, systemImage: "checkmark")
           .foregroundStyle(.secondary)
           .font(.caption)
+      } else if let status = compactStatus {
+        Label(status, systemImage: "archivebox")
+          .foregroundStyle(.secondary)
+          .font(.caption)
       }
       Spacer()
       Button {
@@ -179,6 +214,13 @@ struct RecoveryDetailView: View {
       } label: {
         Label("Open archive", systemImage: "folder")
       }
+      Button {
+        showingCompactConfirmation = true
+      } label: {
+        Label("Compact", systemImage: "archivebox")
+      }
+      .disabled(entry.isCompacted)
+      .help(entry.isCompacted ? "Already compacted" : "Drop snapshot files; keep recovered text + manifest.")
       Button(role: .destructive) {
         showingDeleteConfirmation = true
       } label: {

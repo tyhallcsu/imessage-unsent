@@ -522,6 +522,10 @@ final class StubDaemonControlClient: DaemonControlClienting {
     deleteCallCount += 1
     return deleteResult
   }
+
+  func compact(id _: String) -> CompactResult {
+    CompactResult(ok: false, errorMessage: "stub")
+  }
 }
 
 final class StubNotificationProbe: NotificationPermissionProbing {

@@ -95,4 +95,8 @@ private final class StubControlClient: DaemonControlClienting {
   func delete(id _: String) -> Bool {
     false
   }
+
+  func compact(id _: String) -> CompactResult {
+    CompactResult(ok: false, errorMessage: "stub")
+  }
 }
