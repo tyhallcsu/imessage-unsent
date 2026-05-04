@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./assets/icon.svg" alt="imessage-unsent icon" width="96">
+<img src="./assets/icon.svg" alt="imessage-unsent recovered message icon" width="96">
 
 # imessage-unsent
 
@@ -11,7 +11,7 @@
 [![Stack: bash + python](https://img.shields.io/badge/Stack-bash%20%2B%20python3-yellow.svg)](#usage)
 [![Status: tactical](https://img.shields.io/badge/Status-tactical-orange.svg)](#limitations)
 
-<img src="./assets/hero.svg" alt="imessage-unsent project artwork" width="920">
+<img src="./assets/hero.svg" alt="imessage-unsent hero artwork showing recovered message data emerging from chat.db-wal" width="920">
 
 </div>
 
@@ -258,7 +258,7 @@ grep -RIn "$GUID" export/
 
 ## Recovery workflow
 
-<img src="./assets/recovery-flow.svg" alt="Five-step imessage-unsent workflow from snapshot to WAL recovery and cross-check" width="100%">
+<img src="./assets/recovery-flow.svg" alt="Six-step imessage-unsent workflow from snapshot through WAL recovery, cross-check, and archive" width="100%">
 
 This diagram mirrors `scripts/recover.sh`: snapshot the live Messages database family, resolve the target handle and candidate row, dump the retraction metadata, scan `chat.db-wal` for GUID-adjacent pre-retract text, then cross-check length and exporter output when available.
 

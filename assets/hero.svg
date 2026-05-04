@@ -1,59 +1,109 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 460" width="1200" height="460" role="img" aria-label="imessage-unsent project artwork">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 460" width="1200" height="460" role="img" aria-labelledby="title desc">
+  <title id="title">imessage-unsent README hero artwork</title>
+  <desc id="desc">A premium forensic banner showing a recovered speech bubble motif connected to layered chat database and WAL recovery panels.</desc>
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0b1020"/>
-      <stop offset="0.58" stop-color="#101827"/>
-      <stop offset="1" stop-color="#05070d"/>
+    <linearGradient id="board" x1="88" y1="54" x2="1098" y2="418" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#182131"/>
+      <stop offset="0.55" stop-color="#101827"/>
+      <stop offset="1" stop-color="#0a1019"/>
     </linearGradient>
-    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#2dd4bf"/>
-      <stop offset="0.5" stop-color="#60a5fa"/>
-      <stop offset="1" stop-color="#a78bfa"/>
+    <linearGradient id="boardEdge" x1="58" y1="36" x2="1142" y2="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#526178" stop-opacity="0.78"/>
+      <stop offset="1" stop-color="#94a3b8" stop-opacity="0.18"/>
     </linearGradient>
-    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#1f2937" stop-opacity="0.92"/>
-      <stop offset="1" stop-color="#111827" stop-opacity="0.92"/>
+    <linearGradient id="iconShell" x1="110" y1="110" x2="360" y2="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#202c3f"/>
+      <stop offset="1" stop-color="#0f1724"/>
     </linearGradient>
-    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
-      <path d="M32 0H0v32" fill="none" stroke="#334155" stroke-width="1" opacity="0.18"/>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#67e8f9"/>
+      <stop offset="0.5" stop-color="#2dd4bf"/>
+      <stop offset="1" stop-color="#14b8a6"/>
+    </linearGradient>
+    <linearGradient id="cardFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#141d2c"/>
+      <stop offset="1" stop-color="#0f1724"/>
+    </linearGradient>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <path d="M28 0H0V28" fill="none" stroke="#93a2b8" stroke-opacity="0.09" stroke-width="1"/>
     </pattern>
   </defs>
 
-  <rect width="1200" height="460" rx="0" fill="url(#bg)"/>
-  <rect width="1200" height="460" fill="url(#grid)"/>
-  <rect x="90" y="75" width="1020" height="310" rx="8" fill="#0f172a" opacity="0.45" stroke="#334155"/>
+  <rect x="32" y="24" width="1136" height="412" rx="36" fill="url(#board)" stroke="url(#boardEdge)" stroke-width="2"/>
+  <rect x="72" y="64" width="1056" height="332" rx="28" fill="url(#grid)"/>
+  <path d="M78 86c126-58 300-66 438-28 38 10 74 24 112 26 134 10 248-38 415-20v68c-120-22-225 16-336 25-74 6-144-2-214-23C340 103 220 94 78 140Z" fill="#ffffff" opacity="0.04"/>
 
-  <g transform="translate(140 120)">
-    <rect x="0" y="0" width="82" height="82" rx="8" fill="#0b1220" stroke="url(#line)" stroke-width="3"/>
-    <path d="M22 22h37c8 0 14 6 14 14v18c0 8-6 14-14 14H43L25 82V68h-3c-8 0-14-6-14-14V36c0-8 6-14 14-14Z" fill="#f8fafc"/>
-    <path d="M27 40h30M27 54h20" stroke="#475569" stroke-width="5" stroke-linecap="round"/>
-    <path d="M23 61 62 29" stroke="#ef4444" stroke-width="4" stroke-linecap="round"/>
+  <g transform="translate(88 68)">
+    <rect x="0" y="0" width="142" height="30" rx="15" fill="#0e1725" stroke="#334155"/>
+    <circle cx="22" cy="15" r="5" fill="#2dd4bf"/>
+    <text x="36" y="20" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="700" fill="#e2e8f0">WAL frame recovery</text>
+    <text x="0" y="54" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" font-weight="700" fill="#f8fafc">Pre-checkpoint message recovery</text>
   </g>
 
-  <text x="140" y="250" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="70" font-weight="750" letter-spacing="0" fill="#f8fafc">imessage-unsent</text>
-  <text x="143" y="296" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="21" font-weight="400" letter-spacing="0" fill="#cbd5e1">Recover retracted iMessage text from the SQLite WAL.</text>
-  <rect x="143" y="324" width="220" height="5" rx="2.5" fill="url(#line)"/>
+  <g transform="translate(104 132)">
+    <rect x="0" y="0" width="248" height="248" rx="58" fill="url(#iconShell)" stroke="#5b687d" stroke-opacity="0.65" stroke-width="2"/>
+    <path d="M22 34c20-14 50-22 76-22 62 0 112 50 112 112 0 26-8 49-22 70-32-8-54-19-78-40-23-20-36-47-36-77 0-15 3-30 9-43-28 18-46 50-46 86 0 23 8 45 22 63C38 164 28 138 28 110c0-30 12-58 32-76Z" fill="#ffffff" opacity="0.05"/>
 
-  <g transform="translate(730 86)">
-    <rect x="0" y="0" width="360" height="288" rx="8" fill="url(#glass)" stroke="#334155"/>
-    <rect x="0" y="0" width="360" height="42" rx="8" fill="#111827"/>
-    <circle cx="22" cy="21" r="5" fill="#ef4444"/>
-    <circle cx="42" cy="21" r="5" fill="#f59e0b"/>
-    <circle cx="62" cy="21" r="5" fill="#22c55e"/>
-    <text x="90" y="27" font-family="'SFMono-Regular', Consolas, monospace" font-size="14" fill="#94a3b8">/tmp/imessage-recovery</text>
+    <g transform="translate(28 34)">
+      <path d="M54 18h68c27 0 48 21 48 48v36c0 27-21 48-48 48H90l-32 26v-26h-4c-27 0-48-21-48-48V66c0-27 21-48 48-48Z" fill="#0f1724" opacity="0.74"/>
 
-    <text x="28" y="82" font-family="'SFMono-Regular', Consolas, monospace" font-size="18" fill="#e5e7eb">chat.db-wal</text>
-    <rect x="28" y="102" width="304" height="34" rx="6" fill="#0b1220" stroke="#2dd4bf"/>
-    <text x="44" y="124" font-family="'SFMono-Regular', Consolas, monospace" font-size="14" fill="#d1fae5">GUID ... original UTF-8 text</text>
+      <path d="M64 34h68c24 0 42 18 42 42v32c0 24-18 42-42 42H96l-30 24v-24H64c-24 0-42-18-42-42V76c0-24 18-42 42-42Z" fill="url(#accent)"/>
+      <path d="M94 78h46" stroke="#dbffff" stroke-width="8" stroke-linecap="round"/>
+      <path d="M94 100h56" stroke="#dbffff" stroke-width="8" stroke-linecap="round" opacity="0.9"/>
+      <path d="M94 122h38" stroke="#dbffff" stroke-width="8" stroke-linecap="round" opacity="0.78"/>
 
-    <rect x="28" y="150" width="304" height="34" rx="6" fill="#0b1220" stroke="#60a5fa"/>
-    <text x="44" y="172" font-family="'SFMono-Regular', Consolas, monospace" font-size="14" fill="#dbeafe">message_summary_info: rp, otr, ust</text>
+      <path d="M52 34h68c24 0 42 18 42 42v35c0 12-4 23-12 31l-13-16-46 8-19 16v-23H52c-24 0-42-18-42-42V76c0-24 18-42 42-42Z" fill="#243244"/>
+      <path d="M140 58 164 82 163 123 139 100Z" fill="#ebffff" opacity="0.18"/>
+      <path d="M138 58 164 82" stroke="#ecfeff" stroke-width="4" stroke-linecap="round" opacity="0.72"/>
+      <path d="M64 78h44" stroke="#8ea2b8" stroke-width="8" stroke-linecap="round"/>
+      <path d="M64 100h32" stroke="#73859b" stroke-width="8" stroke-linecap="round"/>
+      <path d="M118 58 86 144" stroke="#67e8f9" stroke-width="4.5" stroke-linecap="round" opacity="0.72"/>
+    </g>
 
-    <rect x="28" y="198" width="304" height="34" rx="6" fill="#0b1220" stroke="#a78bfa"/>
-    <text x="44" y="220" font-family="'SFMono-Regular', Consolas, monospace" font-size="14" fill="#ede9fe">attributedBody: streamtyped</text>
+    <rect x="20" y="214" width="134" height="20" rx="10" fill="#0c1320" stroke="#334155"/>
+    <text x="38" y="228" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="12" fill="#9fd9db">recovered message</text>
+  </g>
 
-    <path d="M254 246c18-18 48-18 66 0" stroke="#fbbf24" stroke-width="8" stroke-linecap="round" fill="none"/>
-    <circle cx="270" cy="246" r="22" fill="none" stroke="#fbbf24" stroke-width="7"/>
-    <path d="m287 263 23 23" stroke="#fbbf24" stroke-width="8" stroke-linecap="round"/>
+  <path d="M380 242C450 242 494 204 560 180" fill="none" stroke="#4fd1d9" stroke-width="4" stroke-linecap="round" opacity="0.72"/>
+  <path d="M392 274C474 274 512 256 586 248" fill="none" stroke="#5eead4" stroke-width="2.5" stroke-linecap="round" opacity="0.48"/>
+  <circle cx="440" cy="221" r="5" fill="#67e8f9"/>
+  <circle cx="504" cy="197" r="5" fill="#2dd4bf"/>
+  <circle cx="566" cy="178" r="5" fill="#14b8a6"/>
+
+  <g transform="translate(586 92)">
+    <g opacity="0.55">
+      <rect x="0" y="76" width="280" height="188" rx="24" fill="url(#cardFill)" stroke="#46556a" stroke-width="2"/>
+      <rect x="24" y="24" width="88" height="24" rx="12" fill="#0c1320" stroke="#334155"/>
+      <text x="46" y="40" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="12" fill="#cbd5e1">snapshot</text>
+      <path d="M30 116h170M30 142h214M30 168h170M30 194h214" stroke="#62748c" stroke-width="8" stroke-linecap="round" opacity="0.4"/>
+      <path d="M188 122h40M214 168h28" stroke="#67e8f9" stroke-width="6" stroke-linecap="round" opacity="0.45"/>
+    </g>
+
+    <g opacity="0.78">
+      <rect x="74" y="38" width="296" height="196" rx="24" fill="url(#cardFill)" stroke="#516076" stroke-width="2"/>
+      <rect x="98" y="56" width="104" height="24" rx="12" fill="#0c1320" stroke="#334155"/>
+      <text x="120" y="72" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="12" fill="#d9e2ec">chat.db-wal</text>
+      <path d="M104 114h150M104 140h126M104 166h150" stroke="#5f7287" stroke-width="8" stroke-linecap="round" opacity="0.58"/>
+      <rect x="252" y="102" width="84" height="88" rx="18" fill="#09111c" stroke="#3d4b61"/>
+      <path d="M270 126h48M270 148h38M270 170h54" stroke="#8bf7ff" stroke-width="8" stroke-linecap="round"/>
+      <path d="M248 98 270 126" stroke="#dbffff" stroke-width="3" stroke-linecap="round" opacity="0.66"/>
+    </g>
+
+    <g>
+      <rect x="152" y="0" width="314" height="206" rx="24" fill="url(#cardFill)" stroke="#6a788f" stroke-width="2"/>
+      <rect x="176" y="18" width="88" height="24" rx="12" fill="#0c1320" stroke="#334155"/>
+      <text x="204" y="34" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="12" fill="#dce7f1">recover</text>
+
+      <rect x="178" y="62" width="262" height="34" rx="12" fill="#0c1320" stroke="#355166"/>
+      <text x="198" y="84" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="13" fill="#d4dee9">GUID match -> pre-retract page</text>
+
+      <rect x="178" y="112" width="120" height="70" rx="18" fill="#0b1320" stroke="#355166"/>
+      <path d="M202 136h42M202 154h50" stroke="#8bf7ff" stroke-width="8" stroke-linecap="round"/>
+      <path d="M194 122h48c14 0 24 10 24 24v11c0 14-10 24-24 24h-18l-16 14v-14h-14c-14 0-24-10-24-24v-11c0-14 10-24 24-24Z" fill="none" stroke="#2dd4bf" stroke-width="4"/>
+
+      <rect x="320" y="112" width="120" height="70" rx="18" fill="#0b1320" stroke="#355166"/>
+      <path d="M342 136h24M342 154h42" stroke="#7dd3fc" stroke-width="8" stroke-linecap="round"/>
+      <path d="M332 122h44M332 172h62" stroke="#54657b" stroke-width="6" stroke-linecap="round"/>
+    </g>
   </g>
 </svg>

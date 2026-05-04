@@ -1,33 +1,47 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="imessage-unsent icon">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="title desc">
+  <title id="title">imessage-unsent recovered message icon</title>
+  <desc id="desc">A dark rounded app icon with a layered speech bubble and cyan message lines emerging from a peeled reveal.</desc>
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#111827"/>
-      <stop offset="1" stop-color="#080b12"/>
+    <linearGradient id="bg" x1="32" y1="24" x2="224" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#202c3f"/>
+      <stop offset="0.52" stop-color="#151e2d"/>
+      <stop offset="1" stop-color="#0d1420"/>
     </linearGradient>
-    <linearGradient id="accent" x1="40" y1="32" x2="216" y2="224" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#2dd4bf"/>
-      <stop offset="0.55" stop-color="#60a5fa"/>
-      <stop offset="1" stop-color="#a78bfa"/>
+    <linearGradient id="edge" x1="44" y1="34" x2="212" y2="222" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#475569" stop-opacity="0.72"/>
+      <stop offset="1" stop-color="#94a3b8" stop-opacity="0.2"/>
+    </linearGradient>
+    <linearGradient id="cover" x1="78" y1="76" x2="171" y2="187" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#243244"/>
+      <stop offset="1" stop-color="#162130"/>
+    </linearGradient>
+    <linearGradient id="reveal" x1="126" y1="84" x2="193" y2="178" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#67e8f9"/>
+      <stop offset="0.56" stop-color="#2dd4bf"/>
+      <stop offset="1" stop-color="#14b8a6"/>
     </linearGradient>
   </defs>
 
-  <rect width="256" height="256" rx="40" fill="url(#bg)"/>
-  <rect x="14" y="14" width="228" height="228" rx="32" fill="none" stroke="url(#accent)" stroke-width="3"/>
+  <rect x="12" y="12" width="232" height="232" rx="54" fill="url(#bg)"/>
+  <rect x="14.5" y="14.5" width="227" height="227" rx="51.5" fill="none" stroke="url(#edge)" stroke-width="3"/>
+  <rect x="22" y="22" width="212" height="212" rx="48" fill="#0d1420" opacity="0.2"/>
+  <path d="M50 52c24-18 58-28 88-28 34 0 67 12 89 35-14-8-32-13-51-13-64 0-116 52-116 116 0 19 5 37 13 51-23-22-35-55-35-89 0-30 10-64 28-88Z" fill="#ffffff" opacity="0.04"/>
 
-  <g>
-    <path d="M56 58h128c14 0 26 12 26 26v54c0 14-12 26-26 26h-55l-38 30v-30H56c-14 0-26-12-26-26V84c0-14 12-26 26-26Z" fill="#f8fafc"/>
-    <path d="M70 91h104" stroke="#475569" stroke-width="12" stroke-linecap="round"/>
-    <path d="M70 121h78" stroke="#94a3b8" stroke-width="12" stroke-linecap="round"/>
-    <path d="M64 154 180 74" stroke="#ef4444" stroke-width="10" stroke-linecap="round"/>
+  <g transform="translate(35 42)">
+    <path d="M56 18h72c27 0 48 21 48 48v38c0 27-21 48-48 48H94l-34 28v-28H56c-27 0-48-21-48-48V66c0-27 21-48 48-48Z" fill="#0f1724" opacity="0.72"/>
+
+    <path d="M66 34h72c24 0 42 18 42 42v34c0 24-18 42-42 42h-38l-32 26v-26H66c-24 0-42-18-42-42V76c0-24 18-42 42-42Z" fill="url(#reveal)"/>
+    <path d="M96 79h48" stroke="#dafeff" stroke-width="8" stroke-linecap="round" opacity="0.96"/>
+    <path d="M96 101h58" stroke="#dafeff" stroke-width="8" stroke-linecap="round" opacity="0.88"/>
+    <path d="M96 123h40" stroke="#dafeff" stroke-width="8" stroke-linecap="round" opacity="0.78"/>
+
+    <path d="M54 34h72c24 0 42 18 42 42v36c0 12-4 23-12 31l-14-16-48 8-20 17v-24H54c-24 0-42-18-42-42V76c0-24 18-42 42-42Z" fill="url(#cover)"/>
+    <path d="M141 54c17 6 27 21 27 39v19c0 11-4 22-12 30l-10-12c6-5 10-13 10-21V92c0-13-7-25-18-31l3-7Z" fill="#0b101a" opacity="0.62"/>
+    <path d="M146 58 171 84 170 128 144 103Z" fill="#d7fffb" opacity="0.16"/>
+    <path d="M143 58 170 83" stroke="#dafeff" stroke-width="4" stroke-linecap="round" opacity="0.68"/>
+
+    <path d="M66 78h44" stroke="#8ea2b8" stroke-width="8" stroke-linecap="round"/>
+    <path d="M66 100h32" stroke="#73859b" stroke-width="8" stroke-linecap="round" opacity="0.9"/>
+    <path d="M120 58 86 146" stroke="#67e8f9" stroke-width="4.5" stroke-linecap="round" opacity="0.72"/>
   </g>
-
-  <g transform="translate(140 142)">
-    <rect x="0" y="0" width="66" height="18" rx="4" fill="#1f2937" stroke="#2dd4bf" stroke-width="2"/>
-    <rect x="0" y="24" width="66" height="18" rx="4" fill="#1f2937" stroke="#60a5fa" stroke-width="2"/>
-    <rect x="0" y="48" width="66" height="18" rx="4" fill="#1f2937" stroke="#a78bfa" stroke-width="2"/>
-    <path d="M12 9h18M12 33h26M12 57h22" stroke="#e5e7eb" stroke-width="3" stroke-linecap="round"/>
-  </g>
-
-  <circle cx="189" cy="187" r="23" fill="none" stroke="#fbbf24" stroke-width="8"/>
-  <path d="m206 204 20 20" stroke="#fbbf24" stroke-width="9" stroke-linecap="round"/>
 </svg>
