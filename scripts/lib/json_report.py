@@ -5,9 +5,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import plistlib
 from pathlib import Path
 from typing import Any
+
+from recovery_selection import (
+    read_msi_length,
+    read_wal_candidates,
+    select_preferred_wal_candidate,
+    serialize_wal_candidates,
+)
 
 
 def optional_text(value: str) -> str | None:
@@ -16,51 +22,6 @@ def optional_text(value: str) -> str | None:
 
 def optional_int(value: str) -> int | None:
     return int(value) if value else None
-
-
-def read_msi_length(path: Path) -> int | None:
-    if not path.exists() or path.stat().st_size == 0:
-        return None
-    try:
-        plist = plistlib.loads(path.read_bytes())
-    except Exception:
-        return None
-    if not isinstance(plist, dict):
-        return None
-    otr = plist.get("otr")
-    if not isinstance(otr, dict):
-        return None
-    first = otr.get("0") or otr.get(0)
-    if not isinstance(first, dict):
-        return None
-    length = first.get("le")
-    return int(length) if isinstance(length, int) else None
-
-
-def read_wal_candidates(path: Path) -> list[dict[str, Any]]:
-    if not path.exists() or path.stat().st_size == 0:
-        return []
-    try:
-        raw = json.loads(path.read_text())
-    except Exception:
-        return []
-    if not isinstance(raw, list):
-        return []
-
-    candidates: list[dict[str, Any]] = []
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        text = item.get("text")
-        candidates.append(
-            {
-                "offset": item.get("offset"),
-                "length": item.get("length"),
-                "text_preview": text[:120] if isinstance(text, str) else "",
-                "text_b64": item.get("text_b64"),
-            }
-        )
-    return candidates
 
 
 def read_iphone_backup(path: Path) -> dict[str, Any]:
@@ -89,20 +50,28 @@ def main() -> int:
     parser.add_argument("--failure-category", default="")
     args = parser.parse_args()
 
-    wal_candidates = read_wal_candidates(args.wal_json)
-    first_wal = wal_candidates[0] if wal_candidates else None
+    msi_length = read_msi_length(args.msi)
+    raw_wal_candidates = read_wal_candidates(args.wal_json)
+    selected_wal = select_preferred_wal_candidate(raw_wal_candidates, msi_length)
+    wal_candidates = serialize_wal_candidates(
+        raw_wal_candidates,
+        msi_length,
+        selected_wal.get("selected_candidate_index") if selected_wal else None,
+    )
     iphone_backup = read_iphone_backup(args.iphone_json)
     iphone_hit = bool(iphone_backup.get("hit"))
     ab_size = args.ab.stat().st_size if args.ab.exists() else 0
     msi_size = args.msi.stat().st_size if args.msi.exists() else 0
 
     recovered = {
-        "text_b64": first_wal.get("text_b64") if first_wal else None,
-        "length": first_wal.get("length") if first_wal else None,
-        "source": "wal" if first_wal else None,
-        "wal_offset": first_wal.get("offset") if first_wal else None,
+        "text_b64": selected_wal.get("selected_text_b64") if selected_wal else None,
+        "length": selected_wal.get("selected_length") if selected_wal else None,
+        "source": "wal" if selected_wal else None,
+        "wal_offset": selected_wal.get("offset") if selected_wal else None,
     }
-    if not first_wal and iphone_hit:
+    if selected_wal and selected_wal.get("trimmed_to_msi_length"):
+        recovered["trimmed_to_msi_length"] = True
+    if not selected_wal and iphone_hit:
         recovered = {
             "text_b64": iphone_backup.get("text_b64"),
             "length": iphone_backup.get("length"),
@@ -110,7 +79,9 @@ def main() -> int:
             "wal_offset": None,
         }
     if not recovered.get("text_b64"):
-        recovered["failure_category"] = args.failure_category or "wal_checkpointed"
+        recovered["failure_category"] = args.failure_category or (
+            "unknown" if wal_candidates else "wal_checkpointed"
+        )
 
     payload = {
         "schema_version": 1,
@@ -122,7 +93,7 @@ def main() -> int:
             "guid": optional_text(args.guid),
             "sent_at": optional_text(args.sent_at),
             "edited_at": optional_text(args.edited_at),
-            "msi_otr_le": read_msi_length(args.msi),
+            "msi_otr_le": msi_length,
         },
         "vectors": {
             "msi": {
