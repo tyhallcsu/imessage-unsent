@@ -194,21 +194,7 @@ json_report() {
 
 batch_first_wal_result() {
   local wal_json="${1:?usage: batch_first_wal_result <wal_json>}"
-  python3 - "$wal_json" <<'PY'
-import json
-import sys
-
-try:
-    data = json.load(open(sys.argv[1]))
-except Exception:
-    data = []
-
-if data:
-    first = data[0]
-    print(f"{first.get('offset', '')}\t{first.get('length', '')}\t{first.get('text_b64', '')}")
-else:
-    print("\t\t")
-PY
+  python3 "$LIB_DIR/recovery_selection.py" --wal-json "$wal_json" --format tsv
 }
 
 batch_state_recent() {

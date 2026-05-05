@@ -14,6 +14,7 @@ APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_BINARY="$APP_MACOS/$EXECUTABLE_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
+VERSION_SOURCE="$ROOT_DIR/daemon/Sources/IMUCore/Version.swift"
 
 pkill -x "$EXECUTABLE_NAME" >/dev/null 2>&1 || true
 
@@ -25,6 +26,14 @@ mkdir -p "$APP_MACOS" "$APP_CONTENTS/Resources"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
 cp "$PACKAGE_DIR/Info.plist" "$INFO_PLIST"
+
+APP_VERSION="${IMU_APP_VERSION:-$(awk -F '\"' '/^public let imuDaemonVersion = / { print $2; exit }' "$VERSION_SOURCE")}"
+if [[ -n "$APP_VERSION" ]]; then
+  /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $APP_VERSION" "$INFO_PLIST" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$INFO_PLIST"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $APP_VERSION" "$INFO_PLIST" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_VERSION" "$INFO_PLIST"
+fi
 
 # Stage AppIcon.icns so the dev-built .app shows the real icon in Finder/Dock.
 bash "$ROOT_DIR/scripts/build-app-icon.sh"

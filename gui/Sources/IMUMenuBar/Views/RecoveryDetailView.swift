@@ -5,14 +5,32 @@ import SwiftUI
 struct RecoveryDetailView: View {
   @ObservedObject var model: MenuBarModel
   let entry: ArchiveHistoryEntryDTO
-  let detail: RecoveryDetail?
-  let loadError: String?
   let dismiss: () -> Void
+
+  @StateObject private var retryModel: IPhoneBackupRetryModel
+  @State private var currentDetail: RecoveryDetail?
+  @State private var currentLoadError: String?
 
   @State private var showingDeleteConfirmation = false
   @State private var showingCompactConfirmation = false
   @State private var copyConfirmation: String?
   @State private var compactStatus: String?
+
+  init(
+    model: MenuBarModel,
+    entry: ArchiveHistoryEntryDTO,
+    detail: RecoveryDetail?,
+    loadError: String?,
+    dismiss: @escaping () -> Void,
+    retryRunner: IPhoneBackupRetryRunning = IPhoneBackupRetryRunner()
+  ) {
+    self.model = model
+    self.entry = entry
+    self.dismiss = dismiss
+    _currentDetail = State(initialValue: detail)
+    _currentLoadError = State(initialValue: loadError)
+    _retryModel = StateObject(wrappedValue: IPhoneBackupRetryModel(runner: retryRunner))
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -96,7 +114,7 @@ struct RecoveryDetailView: View {
 
   @ViewBuilder
   private var recoveredTextBlock: some View {
-    if let text = detail?.recoveredText ?? entry.text, !text.isEmpty {
+    if let text = currentDetail?.recoveredText ?? entry.text, !text.isEmpty {
       VStack(alignment: .leading, spacing: 6) {
         Text("Recovered text")
           .font(.caption)
@@ -122,6 +140,19 @@ struct RecoveryDetailView: View {
               .foregroundStyle(.secondary)
               .textSelection(.enabled)
           }
+          if shouldShowIPhoneBackupRetry {
+            HStack(alignment: .center, spacing: 10) {
+              Button {
+                retryFromIPhoneBackup()
+              } label: {
+                Label("Try iPhone backup", systemImage: "iphone")
+              }
+              .disabled(retryModel.isRunning || entry.isCompacted)
+              .help(entry.isCompacted
+                    ? "Retry unavailable after compaction"
+                    : "Re-run recover.sh against iPhone backups only.")
+            }
+          }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
@@ -131,7 +162,7 @@ struct RecoveryDetailView: View {
   }
 
   private var failureCategory: RecoveryFailureCategory? {
-    detail?.failureCategory ?? entry.failureCategory
+    currentDetail?.failureCategory ?? entry.failureCategory
   }
 
   private var notRecoverableHeader: String {
@@ -145,7 +176,7 @@ struct RecoveryDetailView: View {
     if let category = failureCategory {
       return category.displayMessage
     }
-    return detail?.recoveryError ?? entry.error ?? "(no text recovered)"
+    return currentDetail?.recoveryError ?? entry.error ?? "(no text recovered)"
   }
 
   private var notRecoverableHint: String? {
@@ -160,17 +191,17 @@ struct RecoveryDetailView: View {
       VStack(alignment: .leading, spacing: 6) {
         metadataRow("Handle", entry.handle)
         metadataRow("Row ID", String(entry.rowid))
-        if let detail {
-          metadataRow("GUID", detail.guid)
+        if let currentDetail {
+          metadataRow("GUID", currentDetail.guid)
         }
         metadataRow("Detected at", entry.detectedAt)
         metadataRow("Archive ID", entry.id)
         metadataRow("Archive path", entry.archivePath)
-        if let detail, !detail.snapshotFiles.isEmpty {
-          metadataRow("Snapshot files", detail.snapshotFiles.joined(separator: ", "))
+        if let currentDetail, !currentDetail.snapshotFiles.isEmpty {
+          metadataRow("Snapshot files", currentDetail.snapshotFiles.joined(separator: ", "))
         }
-        if let loadError {
-          metadataRow("Load warning", loadError)
+        if let currentLoadError {
+          metadataRow("Load warning", currentLoadError)
         }
       }
       .padding(12)
@@ -201,6 +232,9 @@ struct RecoveryDetailView: View {
         Label(status, systemImage: "archivebox")
           .foregroundStyle(.secondary)
           .font(.caption)
+      } else if let statusText = retryModel.statusMessage,
+                let statusImage = retryModel.statusSystemImage {
+        retryStatusChip(text: statusText, systemImage: statusImage)
       }
       Spacer()
       Button {
@@ -208,7 +242,7 @@ struct RecoveryDetailView: View {
       } label: {
         Label("Copy text", systemImage: "doc.on.doc")
       }
-      .disabled((detail?.recoveredText ?? entry.text)?.isEmpty != false)
+      .disabled((currentDetail?.recoveredText ?? entry.text)?.isEmpty != false)
       Button {
         NSWorkspace.shared.open(URL(fileURLWithPath: entry.archivePath, isDirectory: true))
       } label: {
@@ -232,7 +266,7 @@ struct RecoveryDetailView: View {
   }
 
   private func copyRecoveredText() {
-    let text = detail?.recoveredText ?? entry.text ?? ""
+    let text = currentDetail?.recoveredText ?? entry.text ?? ""
     guard !text.isEmpty else { return }
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
@@ -242,5 +276,33 @@ struct RecoveryDetailView: View {
       try? await Task.sleep(nanoseconds: 1_500_000_000)
       copyConfirmation = nil
     }
+  }
+
+  private var shouldShowIPhoneBackupRetry: Bool {
+    !(currentDetail?.recovered ?? entry.recovered)
+  }
+
+  private func retryFromIPhoneBackup() {
+    let archiveDir = URL(fileURLWithPath: entry.archivePath, isDirectory: true)
+    Task { @MainActor in
+      if let reloadedDetail = await retryModel.retry(
+        archiveDir: archiveDir,
+        handle: entry.handle,
+        rowid: entry.rowid
+      ) {
+        currentDetail = reloadedDetail
+        currentLoadError = nil
+        model.refresh()
+      }
+    }
+  }
+
+  private func retryStatusChip(text: String, systemImage: String) -> some View {
+    Label(text, systemImage: systemImage)
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .padding(.horizontal, 8)
+      .padding(.vertical, 4)
+      .background(RoundedRectangle(cornerRadius: 6).fill(Color.gray.opacity(0.12)))
   }
 }

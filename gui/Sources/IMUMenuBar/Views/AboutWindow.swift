@@ -49,6 +49,6 @@ struct AboutWindow: View {
     if let short, let build, build != short {
       return "\(short) (\(build))"
     }
-    return short ?? build ?? "unknown"
+    return short ?? build ?? "dev"
   }
 }
