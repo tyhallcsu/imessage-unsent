@@ -67,6 +67,31 @@ def normalize_wal(wal_path):
     wal_path.write_bytes(wal)
 
 
+def build_attributedstring_typedstream(text):
+    """Produce a minimal valid streamtyped NSAttributedString blob for plain text.
+
+    Mirrors the on-the-wire format observed in chat.db `ec` entries:
+      - `streamtyped` header + class chain for NSAttributedString
+      - NSString init marker `\\x94\\x84\\x01\\x2b`
+      - 1-byte length (we cap fixture text under 128 bytes)
+      - UTF-8 string bytes
+      - `\\x86` terminator + minimal NSDictionary attribute trailer
+    """
+    text_bytes = text.encode("utf-8")
+    if len(text_bytes) >= 0x81:
+        raise ValueError("fixture text must be < 128 UTF-8 bytes")
+    header = (
+        b"\x04\x0bstreamtyped\x81\xe8\x03"
+        b"\x84\x01@"
+        b"\x84\x84\x84\x12NSAttributedString\x00"
+        b"\x84\x84\x08NSObject\x00\x85"
+        b"\x92\x84\x84\x84\x08NSString\x01"
+    )
+    nsstring_payload = b"\x94\x84\x01\x2b" + bytes([len(text_bytes)]) + text_bytes + b"\x86"
+    trailer = b"\x84\x02iI\x01" + bytes([len(text_bytes)]) + b"\x86\x86"
+    return header + nsstring_payload + trailer
+
+
 def build_iphone_backup_fixture(out_dir, handle, guid, fixture_text, sent_at):
     backup_root = out_dir / "iphone-backup"
     file_id = "3d0d7e5fb2ce288813306e4d4636395e047a3d28"
@@ -249,8 +274,57 @@ for suffix in ("-wal", "-shm"):
             break
         time.sleep(0.05)
 
+edit_rowid = 300
+edit_guid = "00000000-0000-0000-0000-000000000300"
+edit_sent_at = base_date + 100
+edit_v1_text = "edit fixture v1: original draft"
+edit_v2_text = "edit fixture v2: revised after typo"
+edit_v1_apple_real = (edit_sent_at) / 1_000_000_000
+edit_v2_apple_real = edit_v1_apple_real + 7.5  # 7.5 s later
+edit_msi = plistlib.dumps(
+    {
+        "amc": 1,
+        "ec": {
+            "0": [
+                {"d": edit_v1_apple_real, "t": build_attributedstring_typedstream(edit_v1_text)},
+                {"d": edit_v2_apple_real, "t": build_attributedstring_typedstream(edit_v2_text)},
+            ],
+        },
+        "ep": [0],
+        "otr": {"0": {"le": len(edit_v2_text), "lo": 0}},
+        "ust": True,
+    },
+    fmt=plistlib.FMT_BINARY,
+)
+edit_date_edited = edit_sent_at + int(7.5 * 1_000_000_000)
+writer.execute(
+    """
+    INSERT INTO message
+      (ROWID, guid, text, attributedBody, service, account, handle_id, date,
+       date_read, date_delivered, date_edited, date_retracted, is_empty,
+       is_from_me, is_delivered, message_summary_info)
+    VALUES (?, ?, ?, ?, 'iMessage', 'fixture@example.com', 1, ?, 0, 0, ?, 0, 0, 0, 1, ?)
+    """,
+    (
+        edit_rowid,
+        edit_guid,
+        edit_v2_text,
+        build_attributedstring_typedstream(edit_v2_text),
+        edit_sent_at,
+        edit_date_edited,
+        edit_msi,
+    ),
+)
+writer.execute(
+    "INSERT INTO chat_message_join (chat_id, message_id, message_date) VALUES (1, ?, ?)",
+    (edit_rowid, edit_sent_at),
+)
+writer.commit()
+
 build_iphone_backup_fixture(out_dir, handle, guid, fixture_text, sent_at)
 normalize_wal(Path(f"{db_path}-wal"))
 print(f"fixture_text={fixture_text}", flush=True)
+print(f"edit_v1={edit_v1_text}", flush=True)
+print(f"edit_v2={edit_v2_text}", flush=True)
 os._exit(0)
 PY
