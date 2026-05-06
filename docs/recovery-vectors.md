@@ -13,8 +13,11 @@ For each vector below: what it does, where it fires from in the orchestrator, th
 | 4      | `wal-candidates.json`, `wal-hits.txt`           | No                  | **The vector that actually recovers text**                  |
 | 5      | `exporter-hits.txt`                             | No                  | Cross-check via third-party tool                            |
 | 6      | `iphone-backup.json`                            | No                  | Last-resort lookup in unencrypted iPhone backups            |
+| 7      | (separate CLI: `edit-history.py`)               | No                  | Recovers prior versions of **edited** messages from the `ec` chain in `message_summary_info` — distinct from the unsent flow above |
 
 When `--json` is set, [`scripts/lib/json_report.py`](../scripts/lib/json_report.py) emits the final report from Vector 4's first candidate, falling back to Vector 6 if WAL extraction came up empty. Vectors 2, 3, and 5 are metadata/cross-check and never appear directly in the JSON `recovered.text_b64` field.
+
+Vector 7 is intentionally a separate CLI tool, not a step in `recover.sh`, because it operates on a different predicate (`is_empty = 0` rather than `= 1`) and its source — the `ec` chronology array — sits on the row itself, so it doesn't race against WAL checkpointing. See [`scripts/edit-history.py`](../scripts/edit-history.py).
 
 ---
 
@@ -251,6 +254,37 @@ The daemon mitigates this with a **rolling snapshot buffer** at `~/Library/Appli
 
 ---
 
+## Vector 7 — `message_summary_info` edit chronology (`ec` chain)
+
+**Purpose.** When a sender *edits* a message (Apple's 15-minute window, up to 5 edits), every prior version of that message — including the original — is preserved on the row in the `message_summary_info` BLOB as a typedstream-encoded `NSAttributedString`, with an Apple-absolute timestamp per edit. This is **distinct from the unsent/retraction recovery** Vectors 0–6 implement: an edit leaves `is_empty = 0` and the new text in `text` / `attributedBody`; the original text is hidden in `msi.ec`.
+
+**Triggered when.** Only when the user runs the standalone tool [`scripts/edit-history.py`](../scripts/edit-history.py). It is not part of `recover.sh`'s default flow because the predicate inverts: `recover.sh` filters `is_empty = 1` (retraction); this vector requires `is_empty = 0 AND date_edited != 0`.
+
+**Code path:**
+- [`scripts/edit-history.py`](../scripts/edit-history.py) opens `chat.db` read-only (`mode=ro` SQLite URI), filters `message` rows by `date_edited != 0 AND is_empty = 0`, optionally narrowed by `--handle`, `--rowid`, or `--since`.
+- For each row it loads the `message_summary_info` BLOB, decodes it as a binary plist, walks the `ec` (edit chronology) dict — keyed by message-part index, each value an array of `{d: NSDate-as-real, t: typedstream bytes}` entries.
+- For each `t` blob it locates the NSString init marker `\x94\x84\x01\x2b`, reads the typedstream length prefix (1, 3, or 5 bytes depending on string length), and extracts the UTF-8 payload up to the `\x86` element terminator. **No optional Python deps required** — the byte pattern is stable across Sequoia builds.
+- A fallback regex extractor handles edge cases where the length prefix is malformed (rich-text edits, attachments, mentions).
+
+**Reads:**
+- `~/Library/Messages/chat.db` (or `--db PATH`)
+
+**Writes:** nothing to disk; report goes to stdout (text or `--json`).
+
+**Returns nothing when:**
+- The row's `message_summary_info` is NULL or has no `ec` key — happens when the message was never edited, or when an edit-then-unsend sequence cleared the chronology (full retraction overwrites `msi`).
+- The `ec` entry's `t` blob doesn't contain the NSString init marker — typically attachments, Tapbacks, or rich-text edits whose typedstream encoding differs from plain text. The decoder returns `text: null` for these but still surfaces the timestamp.
+- The row was hard-deleted (Messages → Delete) before recovery — `ec` lives on the row, so deletion takes the chronology with it. Older WAL frames or the rolling snapshot buffer (issue #67) may still hold the BLOB.
+
+**Subtleties:**
+- **No WAL race.** Unlike Vector 4, this vector reads from `chat.db` directly. The chronology survives until the row is deleted or the next edit overwrites it (each edit replaces the BLOB, not appends — but the BLOB itself contains the full chain). Recovery is reliable for hours-to-days, not seconds-to-minutes.
+- **Chain is cumulative within one edit window.** Up to 5 versions per message; the array preserves order with timestamps so you can replay the typing trajectory.
+- **Distinct from `attributedBody` typedstream.** The `attributedBody` column holds the *current* version. The `ec.t` blobs hold *prior* versions. They share the wire format but live on different fields.
+- **Read-only invariant.** The tool opens `chat.db` with `mode=ro`; covered by `tests/python/test_edit_history.py::test_readonly_invariant` which compares the file's bytes before and after the run.
+- **Currently CLI-only.** The daemon does not yet detect or archive edit events — that's the scope of [issue #106](https://github.com/tyhallcsu/imessage-unsent/issues/106) follow-up work in `RetractionDetector` and `ArchivePipeline`.
+
+---
+
 ## Limitations — when each vector fails
 
 Each vector has a failure mode. When all of them fail it's almost always for the same underlying reason: **SQLite WAL is a rolling buffer, not an audit log.** Once iMessage commits and SQLite checkpoints the WAL into `chat.db`, the original page image is overwritten — the unsent text is no longer on disk anywhere outside external backups (Vector 6).
@@ -264,6 +298,7 @@ Each vector has a failure mode. When all of them fail it's almost always for the
 | 4 — `chat.db-wal` byte forensics | The pre-retract page is no longer in the WAL. Long messages and slow unsends are the dominant cause: more time → higher chance of an intervening checkpoint. The rolling snapshot buffer at `~/Library/Application Support/imessage-unsent/wal-history/` mitigates but does not eliminate this. |
 | 5 — `imessage-exporter` cross-check | Same root cause as Vector 4 — operates on the same `chat.db` post-retract. Useful as a sanity check, not as a primary vector. |
 | 6 — external backups | No backup exists for the relevant time window, or the iTunes/Finder backup is encrypted (this tool cannot decrypt). Time Machine and APFS local snapshots are the most reliable subset when configured. |
+| 7 — `ec` edit chronology | The message was unsent (full retraction wipes `msi.ec`), the row was hard-deleted, or the edit was a non-text content type (attachment, Tapback) whose typedstream encoding doesn't follow the plain-text NSString pattern. Plain-text edits recover reliably for the lifetime of the row. |
 
 ### Practical guidance to maximize recovery rate
 

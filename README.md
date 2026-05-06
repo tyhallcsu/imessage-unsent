@@ -256,6 +256,17 @@ grep -RIn "$GUID" export/
 
 </details>
 
+### Bonus — recovering *edits* (not unsends): `scripts/edit-history.py`
+
+A separate forensic vector for the related-but-distinct case where the sender **edited** a message instead of unsending it. Edits leave the row populated (`is_empty = 0`) so `recover.sh` skips them, but every prior version is preserved on the row in `message_summary_info.ec` as a typedstream-encoded `NSAttributedString` with per-edit timestamps.
+
+```bash
+python3 scripts/edit-history.py --since 7d --json
+python3 scripts/edit-history.py --handle '+1XXXXXXXXXX' --rowid 12345
+```
+
+Unlike the unsent-recovery flow, this vector doesn't race against WAL checkpointing — the chronology lives on the row itself. See [docs/recovery-vectors.md § Vector 7](docs/recovery-vectors.md#vector-7--message_summary_info-edit-chronology-ec-chain) for the full technical reference.
+
 ## Limitations — what this tool *cannot* recover
 
 Recovery is best-effort and inherently racy. SQLite WAL is a **rolling buffer**, not an audit log: once iMessage commits a write and SQLite checkpoints the WAL into `chat.db`, the original page image is gone. The recovery vectors above each work some fraction of the time, and the daemon improves the odds, but **none of them is a guarantee**.
