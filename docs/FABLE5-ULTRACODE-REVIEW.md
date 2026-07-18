@@ -299,6 +299,26 @@ The Sequoia predicate (`date_edited != 0 AND is_empty = 1`) is correct and consi
 7. **F-M3 Makefile glob, F-M7 release-notes name+test, F-M6 version guard, F-M8/F-M9 release.yml** — CI/release hardening. *(small PRs)*
 8. **F-M4/F-M5/F-M10 + LOW cluster** — reliability + coverage backlog.
 
+### Remediation status — 2026-07-18 pass
+
+All High findings and the review's Medium reliability/security/release cluster are now merged to `main` (`438714a`). Each fix shipped with deterministic regression tests; no read-only/Notify-only boundary was weakened and no Restore-mode work was done.
+
+| Finding | Fix | PR | State |
+| --- | --- | --- | --- |
+| F-H3 corrupt `state.json` crash loop | quarantine + fresh state | #117 | ✅ merged |
+| Docs reconciliation (§5) | stale-claim sweep | #118 | ✅ merged |
+| F-M3 Makefile lint glob | `$(wildcard …)` | #119 | ✅ merged |
+| **F-H1/F-H2** subprocess pipe-deadlock + no timeout | `BoundedProcessRunner` (concurrent capped drain + 120 s SIGTERM→SIGKILL) | #120 | ✅ merged |
+| **F-H4** WAL 512-byte window drops long messages | bounded configurable window (8 KB, `--window`) + truncation reporting | #121 | ✅ merged |
+| **F-H5** size-only WAL change detection | `WALChangeSignature` (size + ns-mtime + inode) in poll + snapshotter | #122 | ✅ merged |
+| **F-M1** predictable/world-traversable `/tmp` work dir | `umask 077` + private `mktemp` dir + owner-only snapshot + cleanup trap | #123 | ✅ merged |
+| **F-M6/M7/M8/M9** release-workflow hardening | env-passed dispatch input, tag checkout, artifact-name fix, version-drift guard | #125 | ✅ merged |
+| Edit-history recovery (#106) | read-only `edit-history.py` (msi `ec` chain) | #107 | ✅ merged |
+
+**New finding raised this pass:** an intermittent SIGTRAP crash in `ControlServerTests` during the *full* daemon suite (cross-test/socket-teardown race, pre-existing, not caused by any PR above) — tracked in **#124**.
+
+**Still open (backlog / out of scope this pass):** F-M2 socket-doc/SECURITY reconciliation (partly covered by #118), F-M4/F-M5/F-M10 and the LOW cluster, the un-run GUI/accessibility and WAL-fuzz reviews (§12), and the ethics-gated Restore-mode/encryption work (#16/#25/#88).
+
 ## 12. Things NOT verified (explicit)
 
 - **GUI review** (SwiftUI lifecycle, deep-linking, App Doctor accuracy, VoiceOver/Dynamic Type/contrast, empty/error states) — the `swiftui-gui` review agent was terminated by the session limit. The 117 GUI unit tests pass, but accessibility and interactive behavior were **not** independently audited.
