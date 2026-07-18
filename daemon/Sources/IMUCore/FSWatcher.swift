@@ -28,9 +28,12 @@ public final class FSWatcher {
   private var stream: FSEventStreamRef?
   private var pendingCallback: DispatchWorkItem?
   private var pollTimer: DispatchSourceTimer?
-  // -1 sentinel = never reported. Set to the current size on start() so the
-  // first poll cycle does not spuriously fire on the file's pre-existing size.
-  private var lastReportedSize: Int64 = -1
+  // `.absent` sentinel = never reported. Set to the current signature on
+  // start() so the first poll cycle does not spuriously fire on the file's
+  // pre-existing state. Comparing the full signature (size + nanosecond mtime +
+  // inode), not just size, is what lets the poll fallback catch same-size
+  // in-place WAL rewrites in SQLite's post-checkpoint steady state (#111).
+  private var lastReportedSignature: WALChangeSignature = .absent
 
   public init(
     walURL: URL = defaultMessagesWalURL(),
@@ -100,7 +103,7 @@ public final class FSWatcher {
         stream = newStream
       }
 
-      lastReportedSize = Self.fileSize(at: walURL)
+      lastReportedSignature = WALChangeSignature.read(at: walURL)
 
       if pollInterval > 0 {
         let timer = DispatchSource.makeTimerSource(queue: queue)
@@ -169,12 +172,14 @@ public final class FSWatcher {
     scheduleCoalescedCallback()
   }
 
-  /// Called by the polling timer on `queue`. Detects size changes that
-  /// FSEvents may have missed (a known macOS quirk for high-frequency writes
-  /// inside TCC-protected directories like `~/Library/Messages`). Issue #59.
+  /// Called by the polling timer on `queue`. Detects WAL changes that FSEvents
+  /// may have missed (a known macOS quirk for high-frequency writes inside
+  /// TCC-protected directories like `~/Library/Messages`, issue #59). Compares
+  /// the full change signature — not just size — so a same-size in-place frame
+  /// overwrite in SQLite's post-checkpoint steady state is still caught (#111).
   private func pollWAL() {
-    let currentSize = Self.fileSize(at: walURL)
-    guard currentSize != lastReportedSize else {
+    let currentSignature = WALChangeSignature.read(at: walURL)
+    guard currentSignature != lastReportedSignature else {
       return
     }
     scheduleCoalescedCallback()
@@ -191,9 +196,9 @@ public final class FSWatcher {
       }
 
       pendingCallback = nil
-      let size = Self.fileSize(at: walURL)
-      lastReportedSize = size
-      handler(size)
+      let signature = WALChangeSignature.read(at: walURL)
+      lastReportedSignature = signature
+      handler(signature.byteSize)
     }
 
     pendingCallback = callback

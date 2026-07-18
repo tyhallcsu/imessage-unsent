@@ -18,7 +18,7 @@ public final class WALSnapshotter {
   private let queue: DispatchQueue
   private let fileManager: FileManager
   private let clock: () -> Date
-  private var lastSnapshotSize: Int64 = -1
+  private var lastSnapshotSignature: WALChangeSignature = .absent
 
   public init(
     walURL: URL = defaultMessagesWalURL(),
@@ -37,10 +37,12 @@ public final class WALSnapshotter {
     self.clock = clock
   }
 
-  /// Snapshots the current WAL to the rolling buffer. No-op when the WAL
-  /// size is unchanged from the last successful snapshot, which keeps us
-  /// from filling the disk during quiet periods where FSEvents fires but
-  /// nothing actually changed in the file.
+  /// Snapshots the current WAL to the rolling buffer. No-op when the WAL is
+  /// unchanged from the last successful snapshot — comparing the full change
+  /// signature (size + nanosecond mtime + inode), not just size, so a same-size
+  /// in-place frame overwrite in SQLite's post-checkpoint steady state IS
+  /// captured (#111) while a genuinely idle WAL (FSEvents fired but nothing
+  /// changed) is still skipped, keeping us from filling the disk.
   @discardableResult
   public func snapshot() throws -> URL? {
     try queue.sync {
@@ -48,8 +50,9 @@ public final class WALSnapshotter {
       guard fileManager.fileExists(atPath: walURL.path) else {
         return nil
       }
-      let currentSize = walFileSize()
-      if currentSize <= 0 || currentSize == lastSnapshotSize {
+      let signature = WALChangeSignature.read(at: walURL)
+      let currentSize = signature.byteSize
+      if currentSize <= 0 || signature == lastSnapshotSignature {
         return nil
       }
 
@@ -71,7 +74,7 @@ public final class WALSnapshotter {
         [.posixPermissions: 0o600, .modificationDate: now],
         ofItemAtPath: dest.path
       )
-      lastSnapshotSize = currentSize
+      lastSnapshotSignature = signature
       try trim(now: now)
       return dest
     }
@@ -111,16 +114,6 @@ public final class WALSnapshotter {
       withIntermediateDirectories: true,
       attributes: [.posixPermissions: 0o700]
     )
-  }
-
-  private func walFileSize() -> Int64 {
-    guard
-      let attrs = try? fileManager.attributesOfItem(atPath: walURL.path),
-      let size = attrs[.size] as? NSNumber
-    else {
-      return 0
-    }
-    return size.int64Value
   }
 
   private func listSnapshots() throws -> [URL] {

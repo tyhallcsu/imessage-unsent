@@ -171,6 +171,57 @@ final class FSWatcherTests: XCTestCase {
     }
   }
 
+  /// #111: SQLite overwrites WAL frames in place after a checkpoint, leaving
+  /// the file the same size. The polling fallback must detect that via the
+  /// change signature (mtime), not size alone. FSEvents is disabled so the
+  /// poll is the only thing that could catch it.
+  func testPollingFallbackDetectsSameSizeInPlaceChange() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("imu-fswatcher-inplace-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer {
+      try? FileManager.default.removeItem(at: directory)
+    }
+
+    let walURL = directory.appendingPathComponent("chat.db-wal", isDirectory: false)
+    XCTAssertTrue(FileManager.default.createFile(atPath: walURL.path, contents: Data(repeating: 0x41, count: 8)))
+
+    let fired = expectation(description: "poll detects a same-size in-place change")
+    let lock = NSLock()
+    var fireCount = 0
+    let watcher = FSWatcher(
+      walURL: walURL,
+      coalesceInterval: 0.05,
+      pollInterval: 0.1,
+      enableFSEvents: false
+    ) { size in
+      lock.withLock { fireCount += 1 }
+      if size == 8 {
+        fired.fulfill()
+      }
+    }
+
+    try watcher.start()
+    defer {
+      watcher.stop()
+    }
+
+    // Same size (8 bytes), different content, in place (same inode), new mtime.
+    let handle = try FileHandle(forWritingTo: walURL)
+    try handle.seek(toOffset: 0)
+    try handle.write(contentsOf: Data(repeating: 0x42, count: 8))
+    try handle.close()
+    try FileManager.default.setAttributes(
+      [.modificationDate: Date(timeIntervalSince1970: 1_900_000_000)],
+      ofItemAtPath: walURL.path
+    )
+
+    wait(for: [fired], timeout: 3)
+    lock.withLock {
+      XCTAssertGreaterThanOrEqual(fireCount, 1, "same-size in-place change must fire the poll")
+    }
+  }
+
   private func runShellWriter(script: String, path: String) throws {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/sh")

@@ -65,6 +65,28 @@ final class WALSnapshotterTests: XCTestCase {
     XCTAssertEqual(snapper.snapshotCount(), 2)
   }
 
+  func testSnapshotCapturesSameSizeInPlaceContentChange() throws {
+    // The #111 regression: SQLite overwrites WAL frames *in place* after a
+    // checkpoint, so the file stays the same size while its content changes. A
+    // size-only comparator missed this and held stale copies; the signature
+    // (nanosecond mtime) must catch it.
+    try writeWAL(bytes: 1024)
+    let clock = StubClock(start: Date(timeIntervalSince1970: 1_800_000_000))
+    let snapper = WALSnapshotter(walURL: walURL, storeDir: storeDir, clock: clock.now)
+
+    let first = try XCTUnwrap(try snapper.snapshot())
+
+    // Same size (1024), different bytes, same inode (in place), newer mtime.
+    try overwriteWALInPlace(byte: 0xCD, count: 1024, mtime: Date(timeIntervalSince1970: 1_900_000_000))
+    clock.advance(by: 1)
+    let second = try snapper.snapshot()
+
+    let secondURL = try XCTUnwrap(second, "a same-size in-place WAL rewrite must produce a new snapshot")
+    XCTAssertEqual(snapper.snapshotCount(), 2)
+    XCTAssertNotEqual(first.lastPathComponent, secondURL.lastPathComponent)
+    XCTAssertEqual(try Data(contentsOf: secondURL), Data(repeating: 0xCD, count: 1024))
+  }
+
   func testRetentionLimitTrimsOldestSnapshots() throws {
     let clock = StubClock(start: Date(timeIntervalSince1970: 1_800_000_000))
     let snapper = WALSnapshotter(
@@ -147,6 +169,17 @@ final class WALSnapshotterTests: XCTestCase {
   private func writeWAL(bytes: Int) throws {
     let data = Data(repeating: 0xAB, count: bytes)
     try data.write(to: walURL, options: .atomic)
+  }
+
+  /// Overwrites the WAL in place (preserving the inode, unlike an atomic write)
+  /// and pins its mtime — models SQLite rewriting frames after a checkpoint.
+  private func overwriteWALInPlace(byte: UInt8, count: Int, mtime: Date) throws {
+    let handle = try FileHandle(forWritingTo: walURL)
+    defer { try? handle.close() }
+    try handle.seek(toOffset: 0)
+    try handle.write(contentsOf: Data(repeating: byte, count: count))
+    try handle.synchronize()
+    try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: walURL.path)
   }
 }
 
