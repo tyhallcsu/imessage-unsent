@@ -350,10 +350,12 @@ So immediately after the GUID's 36 ASCII bytes, the `text` column's bytes are in
 The recovery script does exactly this. For each occurrence of the GUID in the WAL:
 
 ```python
-after = data[guid_offset + 36 : guid_offset + 36 + 512]
+after = data[guid_offset + 36 : guid_offset + 36 + WINDOW]  # WINDOW default 8192
 end   = after.find(b'\x04\x0bstreamtyped')
 text  = after[:end].lstrip(b'\x00\x01\x02\x03').decode('utf-8')
 ```
+
+The scan window (`wal_extract.py --window`, default 8192 bytes) is bounded but generous enough for any message stored inline in a single SQLite leaf cell; the `otr.0.le` cross-check trims any over-capture back to the true length. A message whose text runs past the window logs a truncation warning rather than being dropped silently.
 
 Multiple GUID hits = multiple page-image versions. Frames where `text` is empty correspond to the post-retraction state; frames where `text` contains real bytes are pre-retraction.
 
