@@ -1,7 +1,11 @@
 RUFF := $(shell if command -v ruff >/dev/null 2>&1; then echo ruff; elif command -v uvx >/dev/null 2>&1 && uvx --offline ruff --version >/dev/null 2>&1; then echo "uvx --offline ruff"; elif command -v uvx >/dev/null 2>&1; then echo "uvx ruff"; else echo ruff; fi)
 PYTEST := $(shell if python3 -m pytest --version >/dev/null 2>&1; then echo "python3 -m pytest"; elif command -v uvx >/dev/null 2>&1 && uvx --offline pytest --version >/dev/null 2>&1; then echo "uvx --offline pytest"; elif command -v uvx >/dev/null 2>&1; then echo "uvx pytest"; else echo "python3 -m pytest"; fi)
 BATS := $(shell command -v bats 2>/dev/null)
-PYTHON_SOURCES := scripts/decode.py scripts/edit-history.py scripts/lib/wal_extract.py scripts/lib/recovery_selection.py scripts/lib/json_report.py scripts/lib/batch_report.py scripts/lib/iphone_backup.py tests/python/conftest.py tests/python/test_decode.py tests/python/test_edit_history.py
+# Glob so newly-added modules are linted/compiled by default. Previously a
+# hardcoded list silently skipped shipped code (e.g. scripts/lib/wal_merge_candidates.py
+# and tests/python/test_json_report.py were never ruff/py_compile checked). See #116.
+# The glob already covers this PR's scripts/edit-history.py + tests/python/test_edit_history.py.
+PYTHON_SOURCES := $(wildcard scripts/*.py scripts/lib/*.py tests/python/*.py)
 SHELL_SOURCES := scripts/*.sh scripts/lib/*.sh tests/fixtures/*.sh tests/bats/helpers.bash
 
 .PHONY: fixture fixture-check shellcheck python-check bats python-test test \

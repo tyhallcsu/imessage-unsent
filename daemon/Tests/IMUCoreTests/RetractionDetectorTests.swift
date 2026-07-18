@@ -16,6 +16,55 @@ final class RetractionDetectorTests: XCTestCase {
     XCTAssertEqual(try store.load(), DetectorState(lastSeenDateEdited: 42))
   }
 
+  func testStateStoreQuarantinesCorruptFileAndReturnsFreshState() throws {
+    let directory = try makeTemporaryDirectory()
+    defer {
+      try? FileManager.default.removeItem(at: directory)
+    }
+
+    let stateURL = directory.appendingPathComponent("state.json", isDirectory: false)
+    // A truncated / garbage state.json — not valid JSON for DetectorState.
+    try Data("{ this is not valid json".utf8).write(to: stateURL)
+
+    var logged: [String] = []
+    let store = DetectorStateStore(
+      url: stateURL,
+      logger: { logged.append($0) },
+      now: { Date(timeIntervalSince1970: 1_700_000_000) }
+    )
+
+    // load() must NOT throw (that would crash-loop the daemon under KeepAlive).
+    let loaded = try store.load()
+    XCTAssertEqual(loaded, DetectorState())
+
+    // The corrupt file is quarantined, not left in place to fail again.
+    XCTAssertFalse(FileManager.default.fileExists(atPath: stateURL.path))
+    let quarantined = directory.appendingPathComponent("state.json.corrupt-1700000000", isDirectory: false)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: quarantined.path))
+    XCTAssertTrue(logged.contains { $0.contains("quarantined") })
+
+    // A subsequent save + load round-trips cleanly on the fresh state.
+    try store.save(DetectorState(lastSeenDateEdited: 7))
+    XCTAssertEqual(try store.load(), DetectorState(lastSeenDateEdited: 7))
+  }
+
+  func testDetectorInitDoesNotThrowOnCorruptState() throws {
+    let fixture = try makeDetectorFixture()
+    defer {
+      try? FileManager.default.removeItem(at: fixture.directory)
+    }
+    try Data("garbage".utf8).write(to: fixture.stateURL)
+
+    // RetractionDetector.init loads state; it must survive corruption rather
+    // than propagating a throw up to the daemon's exit(1) path (issue #109).
+    XCTAssertNoThrow(
+      try RetractionDetector(
+        chatDBURL: fixture.chatDBURL,
+        stateStore: DetectorStateStore(url: fixture.stateURL)
+      )
+    )
+  }
+
   func testDetectorEmitsRetractionsAndPersistsStateAfterMarkProcessed() throws {
     let fixture = try makeDetectorFixture()
     defer {

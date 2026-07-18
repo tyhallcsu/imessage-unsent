@@ -71,16 +71,19 @@ make release-notes VERSION=v0.4.0
 
 ## Signing and notarization
 
-**Current status: artifacts are unsigned.** macOS Gatekeeper will warn on
-first launch. Users can clear the warning with
-`xattr -d com.apple.quarantine <path>` or wait for a signed build.
+**Current status: signing + notarization are implemented and credential-gated**
+(issue #20, closed). [`scripts/build-release.sh`](../scripts/build-release.sh)
+invokes [`scripts/sign-release.sh`](../scripts/sign-release.sh), which signs the
+daemon binary and the `.app` with the Developer ID Application cert + Hardened
+Runtime and notarizes when the Apple secrets below are present. When the secrets
+are **absent** (forks, local `make rc-smoke`), signing degrades gracefully: an
+ad-hoc `codesign --sign -` fallback (PR #101) is applied so the build still runs,
+and unsigned/ad-hoc artifacts are produced. Ad-hoc/unsigned builds still trip
+Gatekeeper on first launch — clear with `xattr -d com.apple.quarantine <path>`.
 
-The plan to wire signing/notarization is tracked in
-[issue #20](https://github.com/tyhallcsu/imessage-unsent/issues/20).
-The release script is structured so that adding a `scripts/sign-release.sh`
-step in front of the `tar`/`zip` operations is a drop-in change.
+See [`docs/code-signing.md`](code-signing.md) for the full pipeline.
 
-When signing is added, the following GitHub Actions secrets will be required:
+The following GitHub Actions secrets enable full Developer ID signing + notarization:
 
 | Secret | Purpose |
 |---|---|

@@ -46,18 +46,58 @@ public struct DetectorState: Codable, Equatable {
 
 public struct DetectorStateStore {
   public let url: URL
+  private let logger: ((String) -> Void)?
+  private let now: () -> Date
 
-  public init(url: URL = defaultDetectorStateURL()) {
+  public init(
+    url: URL = defaultDetectorStateURL(),
+    logger: ((String) -> Void)? = nil,
+    now: @escaping () -> Date = Date.init
+  ) {
     self.url = url
+    self.logger = logger
+    self.now = now
   }
 
+  /// Loads persisted detector state. A missing file yields a fresh state.
+  ///
+  /// A file that exists but cannot be decoded (truncated after a power loss,
+  /// or corrupted during a crash-respawn cycle) is **quarantined** — renamed
+  /// to `state.json.corrupt-<epoch>` — and a fresh state is returned rather
+  /// than throwing. Throwing here would propagate out of `RetractionDetector.
+  /// init` → the daemon's `run()` → `exit(1)`, and with `KeepAlive=true` in
+  /// the LaunchAgent plist launchd would respawn straight back into the same
+  /// failure ~every 10s, silently stopping all monitoring until a human
+  /// deleted the file (issue #109). A one-time reset of the high-water mark is
+  /// the acceptable cost; archive-dir naming keeps any re-archived events
+  /// distinguishable.
   public func load() throws -> DetectorState {
     guard FileManager.default.fileExists(atPath: url.path) else {
       return DetectorState()
     }
 
     let data = try Data(contentsOf: url)
-    return try JSONDecoder().decode(DetectorState.self, from: data)
+    do {
+      return try JSONDecoder().decode(DetectorState.self, from: data)
+    } catch {
+      quarantineCorruptState(decodeError: error)
+      return DetectorState()
+    }
+  }
+
+  private func quarantineCorruptState(decodeError: Error) {
+    let stamp = Int(now().timeIntervalSince1970)
+    let corruptURL = url.deletingLastPathComponent()
+      .appendingPathComponent("\(url.lastPathComponent).corrupt-\(stamp)", isDirectory: false)
+    // Best-effort move; if the rename fails we still return a fresh state so
+    // the next save() overwrites the corrupt file atomically anyway.
+    try? FileManager.default.removeItem(at: corruptURL)
+    do {
+      try FileManager.default.moveItem(at: url, to: corruptURL)
+      logger?("detector state.json unreadable (\(decodeError.localizedDescription)); quarantined to \(corruptURL.lastPathComponent), starting from fresh state")
+    } catch {
+      logger?("detector state.json unreadable (\(decodeError.localizedDescription)); quarantine rename failed (\(error.localizedDescription)); starting from fresh state")
+    }
   }
 
   public func save(_ state: DetectorState) throws {

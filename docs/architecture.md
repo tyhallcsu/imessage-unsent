@@ -44,7 +44,7 @@ flowchart LR
     Daemon -->|HMAC-signed POST| Webhook
     Daemon -->|reads| Cfg
 
-    GUI -->|status / recent / delete| Sock
+    GUI -->|status / recent / delete / compact| Sock
     GUI -->|reads manifest+recovery| Archives
     GUI -->|writes config| Cfg
     GUI -->|read-only lookup| Contacts
@@ -55,7 +55,7 @@ flowchart LR
 
 Key invariants the diagram encodes:
 - **`chat.db` is read-only to every component.** The CLI, daemon, and GUI all open it `read-only` (the daemon never even opens it write-mode at the file-handle level — see [`FSWatcher.swift`](../daemon/Sources/IMUCore/FSWatcher.swift)). This is enforced by [`60-guardrail-no-chatdb-writes.bats`](../tests/bats/60-guardrail-no-chatdb-writes.bats), which sha256s the live database before and after a recovery run.
-- **The control socket is read-only by default.** [`ControlServer.swift`](../daemon/Sources/IMUCore/ControlServer.swift) only allows `ping`, `status`, `recent`, and `delete` (the last one only removes the daemon's own archive directories — never `chat.db`). All other ops return `{"ok": false, "error": {"code": "read_only"}}`.
+- **The control socket never writes to `chat.db`.** [`ControlServer.swift`](../daemon/Sources/IMUCore/ControlServer.swift) allows `ping`, `status`, `recent` (read-only), plus `delete` and `compact` — the latter two mutate only the daemon's own archive directories (delete removes an archive; compact drops the bulky `chat.db` snapshot family from an archive), validated against an anchored archive-id regex so they cannot traverse out. All other ops return `{"ok": false, "error": {"code": "read_only"}}`.
 - **The GUI never talks directly to `chat.db`.** It reads archive contents from disk (the daemon already wrote them) and uses the control socket for live state. This keeps the GUI usable without Full Disk Access.
 
 ## 2. Detection data flow (one retraction → one archive)
@@ -148,7 +148,7 @@ sequenceDiagram
 ```
 
 What this tells you to watch for:
-- **The WAL is racing checkpoint.** Every second between T+30.0s and the snapshot at T+30.05s is a second SQLite has to checkpoint the WAL and erase the original text. This is why [`FSWatcher`](../daemon/Sources/IMUCore/FSWatcher.swift) is push-driven (FSEvents) and not poll-driven, and why the [`testWatcherToDetectorLatencyIsUnderFiveHundredMilliseconds`](../daemon/Tests/IMUCoreTests/RetractionDetectorTests.swift) assertion exists.
+- **The WAL is racing checkpoint.** Every second between T+30.0s and the snapshot at T+30.05s is a second SQLite has to checkpoint the WAL and erase the original text. This is why [`FSWatcher`](../daemon/Sources/IMUCore/FSWatcher.swift) is primarily push-driven (FSEvents) **with a mandatory 1 Hz polling fallback** (issue #59 / PR #60) — FSEvents drops many `chat.db-wal` writes under `~/Library/Messages`, so the poll timer catches what it misses. Do not remove the poll fallback. The [`testWatcherToDetectorLatencyIsUnderFiveHundredMilliseconds`](../daemon/Tests/IMUCoreTests/RetractionDetectorTests.swift) assertion guards the latency budget.
 - **Notifications and webhook fan out in parallel** so a slow webhook never blocks the user-facing banner.
 - **The GUI does not push** — it polls the control socket every 2 s ([`MenuBarModel.swift`](../gui/Sources/IMUMenuBarCore/Stores/MenuBarModel.swift)). Worst-case freshness is ~2 s after the daemon writes the manifest.
 
