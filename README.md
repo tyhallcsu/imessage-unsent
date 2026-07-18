@@ -166,11 +166,14 @@ The chat.db family is hot. Any new Messages activity rewrites the WAL; auto-chec
 
 ```bash
 osascript -e 'quit app "Messages"'
-mkdir -p /tmp/imessage-recovery
-cp ~/Library/Messages/chat.db     /tmp/imessage-recovery/
-cp ~/Library/Messages/chat.db-wal /tmp/imessage-recovery/
-cp ~/Library/Messages/chat.db-shm /tmp/imessage-recovery/
+# A snapshot of chat.db is a copy of every message — keep it owner-only.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/imessage-recovery.XXXXXX")"   # 0700, unpredictable
+cp ~/Library/Messages/chat.db     "$WORK/" && chmod 600 "$WORK/chat.db"
+cp ~/Library/Messages/chat.db-wal "$WORK/" && chmod 600 "$WORK/chat.db-wal"
+cp ~/Library/Messages/chat.db-shm "$WORK/" && chmod 600 "$WORK/chat.db-shm"
 ```
+
+(`recover.sh` does exactly this automatically — a private `mktemp` work dir it removes on exit, or a `--work DIR` you pass to keep the artifacts.)
 
 All subsequent reads target the snapshot. Do not reopen Messages.app until you've extracted what you need.
 
@@ -392,8 +395,9 @@ cd imessage-unsent
 # Preview batch scope without quitting Messages or snapshotting chat.db
 ./scripts/recover.sh --handles-file handles.txt --dry-run
 
-# Read the report
-cat /tmp/imessage-recovery/report.txt
+# Read the report (pass --work DIR to keep artifacts at a known path)
+./scripts/recover.sh --handle '+15551234567' --work ./imu-out
+cat ./imu-out/report.txt
 
 # Optional: install the typedstream decoder for richer Vector 3 output
 pip3 install --user typedstream
@@ -401,7 +405,7 @@ pip3 install --user typedstream
 cargo install imessage-exporter
 ```
 
-The script writes everything under `/tmp/imessage-recovery/` (override with `--work /path`):
+By default the script writes everything under a private, unpredictable `mktemp -d` work dir (owner-only, removed on exit). Pass `--work /path` to write to a directory you keep — it's hardened to `0700` but never auto-deleted:
 
 | File                       | Content                                                |
 | -------------------------- | ------------------------------------------------------ |

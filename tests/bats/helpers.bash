@@ -14,6 +14,12 @@ imu_test_root() {
   fi
 }
 
+# Portable octal file-mode accessor: BSD stat (macOS) then GNU stat (Linux CI).
+imu_mode() {
+  local target="${1:?usage: imu_mode <path>}"
+  stat -f '%Lp' "$target" 2>/dev/null || stat -c '%a' "$target"
+}
+
 copy_fixture_messages() {
   local destination="${1:?usage: copy_fixture_messages <destination>}"
   mkdir -p "$destination"

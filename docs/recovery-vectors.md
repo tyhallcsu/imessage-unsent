@@ -2,7 +2,7 @@
 
 This is the per-vector technical reference for the recovery pipeline implemented in [`scripts/recover.sh`](../scripts/recover.sh) and [`scripts/lib/`](../scripts/lib/). For the conceptual "why each vector exists" overview, see [the README's "The six recovery vectors" section](../README.md#the-six-recovery-vectors).
 
-For each vector below: what it does, where it fires from in the orchestrator, the exact code path through the helpers, the files it reads and writes (relative to `$WORK`, default `/tmp/imessage-recovery/`), conditions under which it returns nothing, and the non-obvious bits a future maintainer will trip over.
+For each vector below: what it does, where it fires from in the orchestrator, the exact code path through the helpers, the files it reads and writes (relative to `$WORK` — by default a private `mktemp -d` dir under `$TMPDIR` that is removed on exit, or the `--work DIR` you pass, which is hardened to `0700` and kept), conditions under which it returns nothing, and the non-obvious bits a future maintainer will trip over.
 
 | Vector | Primary output                                  | Hard-fails on miss? | Role                                                        |
 | ------ | ----------------------------------------------- | ------------------- | ----------------------------------------------------------- |

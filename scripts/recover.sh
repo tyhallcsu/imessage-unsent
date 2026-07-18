@@ -32,6 +32,20 @@
 
 set -uo pipefail   # NOT -e: each vector runs independently and may fail without aborting
 
+# The work dir holds a full chat.db snapshot and recovered plaintext. Default to
+# owner-only perms for everything we create (dirs 0700, files 0600) so nothing
+# private lands in a world-readable location (#112 / F-M1).
+umask 077
+
+# Removes the auto-created private work dir on exit. A user-supplied --work is
+# never touched — it's theirs to keep.
+imu_cleanup_workdir() {
+  if [[ "${WORK_AUTOCREATED:-0}" == "1" && -n "${WORK:-}" && -d "${WORK:-}" ]]; then
+    rm -rf "$WORK"
+  fi
+  return 0
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/lib"
 
@@ -51,7 +65,8 @@ HANDLE=""
 HANDLES_FILE=""
 ALL_HANDLES=0
 ROWID=""
-WORK="/tmp/imessage-recovery"
+WORK=""            # empty => create a private per-run dir under $TMPDIR
+WORK_AUTOCREATED=0
 LIVE="$HOME/Library/Messages"
 JSON_MODE=0
 SINCE="24h"
@@ -162,7 +177,21 @@ PY
   exit 0
 fi
 
-mkdir -p "$WORK"
+# When the user didn't pass --work, create an unpredictable private dir under
+# $TMPDIR (per-user + 0700 on macOS; mktemp forces 0700 even under /tmp) and
+# remove it on exit. A user-supplied --work is hardened to 0700 but never
+# auto-deleted — it's theirs to keep (#112 / F-M1).
+if [[ -z "$WORK" ]]; then
+  WORK="$(mktemp -d "${TMPDIR:-/tmp}/imessage-recovery.XXXXXX")" || {
+    echo "error: could not create a private work directory" >&2
+    exit 1
+  }
+  WORK_AUTOCREATED=1
+  trap 'imu_cleanup_workdir' EXIT
+else
+  mkdir -p "$WORK"
+  chmod 700 "$WORK" 2>/dev/null || true
+fi
 LOG="$WORK/report.txt"
 SNAP="$WORK/chat.db"
 MSI="$WORK/msi.bin"
@@ -608,6 +637,9 @@ hr
 log "[done] Report: $LOG"
 log "Artifacts:"
 ls -la "$WORK" | sed 's/^/  /' | tee -a "$LOG" >&2
+if [[ "$WORK_AUTOCREATED" == "1" ]]; then
+  log "Note: this private work dir is removed on exit. Pass --work DIR to keep artifacts."
+fi
 
 if [[ "$JSON_MODE" == "1" ]]; then
   json_report
