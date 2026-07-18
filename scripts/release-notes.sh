@@ -31,11 +31,21 @@ if [[ -z "$prev_tag" ]]; then
     | awk -v v="$VERSION" '$0 != v { print; exit }')"
 fi
 
+# Prefer the requested tag as the range end so re-generating notes for an OLD
+# tag reports that tag's history — not whatever is currently checked out
+# (#115 / F-M9). Fall back to HEAD for a local preview run before the tag
+# exists (the documented use of this script).
+if git rev-parse -q --verify "refs/tags/${VERSION}^{commit}" >/dev/null 2>&1; then
+  end_ref="$VERSION"
+else
+  end_ref="HEAD"
+fi
+
 if [[ -n "$prev_tag" ]]; then
-  range="${prev_tag}..HEAD"
+  range="${prev_tag}..${end_ref}"
   range_label="Changes since ${prev_tag}"
 else
-  range="HEAD"
+  range="$end_ref"
   range_label="All commits (first release)"
 fi
 
@@ -109,7 +119,7 @@ cat <<'TAIL'
 ## Artifacts
 
 - `imu-watcher-VERSION-<arch>.tar.gz` — daemon binary + recovery scripts + LaunchAgent template (UNSIGNED)
-- `IMUMenuBar-VERSION.zip` — menu bar app bundle (UNSIGNED)
+- `iMessage-Unsent-VERSION.zip` — menu bar app bundle (UNSIGNED)
 - Each artifact has a sibling `.sha256` file with the SHA-256 checksum.
 
 > [!NOTE]

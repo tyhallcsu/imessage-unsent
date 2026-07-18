@@ -56,12 +56,24 @@ load helpers
   [[ "$output" == "# v9.9.9"* ]]
 }
 
-@test "release-notes.sh emits an Artifacts section" {
+@test "release-notes.sh emits an Artifacts section naming the real artifacts" {
   run bash "$REPO_DIR/scripts/release-notes.sh" v9.9.9
   [ "$status" -eq 0 ]
   [[ "$output" == *"## Artifacts"* ]]
   [[ "$output" == *"imu-watcher-VERSION-"* ]]
-  [[ "$output" == *"IMUMenuBar-VERSION.zip"* ]]
+  # Must match the GUI zip name build-release.sh actually produces (#115 / F-M7).
+  [[ "$output" == *"iMessage-Unsent-VERSION.zip"* ]]
+  [[ "$output" != *"IMUMenuBar-VERSION.zip"* ]]
+}
+
+@test "release-notes artifact names match build-release.sh GUI_ZIP_NAME" {
+  # Guard against future drift: the zip name in the notes must equal the prefix
+  # build-release.sh derives, so they can never silently diverge again.
+  local gui_prefix
+  gui_prefix="$(grep -oE 'GUI_ZIP_NAME="[^"]*"' "$REPO_DIR/scripts/build-release.sh" | head -1)"
+  [[ "$gui_prefix" == *'iMessage-Unsent-${VERSION}.zip'* ]]
+  run bash "$REPO_DIR/scripts/release-notes.sh" v9.9.9
+  [[ "$output" == *"iMessage-Unsent-VERSION.zip"* ]]
 }
 
 @test "release-notes.sh categorizes a feat commit under Highlights" {

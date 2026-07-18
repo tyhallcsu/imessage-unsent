@@ -35,9 +35,14 @@ jobs:
 
       - name: Verify tag format and ancestry
         id: verify
+        env:
+          # Pass the dispatch input through the environment, never interpolated
+          # into the shell, so a crafted tag value cannot inject commands before
+          # the semver guard below runs (#115 / F-M8).
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [[ -n "${{ inputs.tag }}" ]]; then
-            tag="${{ inputs.tag }}"
+          if [[ -n "$INPUT_TAG" ]]; then
+            tag="$INPUT_TAG"
           else
             tag="${GITHUB_REF#refs/tags/}"
           fi
@@ -60,24 +65,37 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Re-build an OLD tag must ship THAT tag's notes + source, not whatever is
+      # currently on main. The checkout above lands on the triggering ref (main
+      # for a manual dispatch); check out the verified tag so every step below
+      # operates on the tag's tree (#115 / F-M9). build-macos already does this.
+      - name: Check out the verified tag
+        env:
+          TAG: ${{ steps.verify.outputs.tag }}
+        run: git checkout --quiet --force "refs/tags/$TAG"
+
       - name: Generate release notes
+        env:
+          TAG: ${{ steps.verify.outputs.tag }}
         run: |
           mkdir -p staging
-          bash scripts/release-notes.sh "${{ steps.verify.outputs.tag }}" \
-            | sed "s/VERSION/${{ steps.verify.outputs.tag }}/g" \
+          bash scripts/release-notes.sh "$TAG" \
+            | sed "s/VERSION/$TAG/g" \
             > staging/release-notes.md
           echo "--- release notes preview ---"
           cat staging/release-notes.md
 
       - name: Build source tarball
+        env:
+          TAG: ${{ steps.verify.outputs.tag }}
         run: |
           # Tarball excludes build artifacts and other generated paths.
           # `staging/` is excluded so the tarball does not contain itself.
           tar --exclude='.git' --exclude='dist' --exclude='imessage-recovery' \
               --exclude='**/.build' --exclude='staging' \
-              -czf "staging/imessage-unsent-${{ steps.verify.outputs.tag }}-source.tar.gz" .
-          ( cd staging && shasum -a 256 "imessage-unsent-${{ steps.verify.outputs.tag }}-source.tar.gz" \
-              > "imessage-unsent-${{ steps.verify.outputs.tag }}-source.tar.gz.sha256" )
+              -czf "staging/imessage-unsent-${TAG}-source.tar.gz" .
+          ( cd staging && shasum -a 256 "imessage-unsent-${TAG}-source.tar.gz" \
+              > "imessage-unsent-${TAG}-source.tar.gz.sha256" )
 
       - uses: actions/upload-artifact@v4
         with:
@@ -97,6 +115,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.tag }}
+
+      # Guard against daemon/Sources/IMUCore/Version.swift drifting from the
+      # release tag — it's hand-maintained and shipped stale through 0.2.0/rc1
+      # once already (#115 / F-M6). Compares base semver so a `-rc` tag still
+      # matches the base version pinned in source.
+      - name: Verify daemon version matches the tag
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          daemon_version="$(sed -n 's/^public let imuDaemonVersion = "\(.*\)"$/\1/p' daemon/Sources/IMUCore/Version.swift)"
+          release_base="${TAG#v}"; release_base="${release_base%%-*}"
+          daemon_base="${daemon_version%%-*}"
+          if [[ "$daemon_base" != "$release_base" ]]; then
+            echo "::error::imuDaemonVersion ($daemon_version) does not match release $TAG."
+            echo "::error::Update daemon/Sources/IMUCore/Version.swift to $release_base before tagging."
+            exit 1
+          fi
+          echo "daemon version $daemon_version matches release $TAG"
 
       - name: Cache daemon .build
         uses: actions/cache@v4
