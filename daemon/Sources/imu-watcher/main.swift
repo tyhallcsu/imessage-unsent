@@ -117,7 +117,12 @@ final class WatcherDaemon {
   private func startWalWatcher() throws {
     let walURL = defaultMessagesWalURL()
     let chatDBURL = defaultMessagesChatDBURL()
-    detector = try RetractionDetector(chatDBURL: chatDBURL)
+    // Route state-store diagnostics (e.g. corrupt state.json quarantine, #109)
+    // into the daemon log so a reset is visible rather than silent.
+    detector = try RetractionDetector(
+      chatDBURL: chatDBURL,
+      stateStore: DetectorStateStore(logger: { [weak self] in self?.log($0) })
+    )
     lastWalSize = FSWatcher.fileSize(at: walURL)
     let watcher = FSWatcher(walURL: walURL) { [weak self] size in
       self?.handleWalChange(size: size)
