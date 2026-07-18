@@ -305,7 +305,7 @@ SQLite in **WAL journaling mode** (the default for `chat.db`) writes new transac
         ...
 ```
 
-Every transaction's modified pages are appended as full page images. Reads that follow walk the WAL backwards and use the most-recent frame for each page; the older frames stay in the file until SQLite **checkpoints** the WAL into the main `.db` (default trigger: ~1000 pages, ~1 MB at 4 KB page size, configurable via `wal_autocheckpoint`).
+Every transaction's modified pages are appended as full page images. Reads that follow walk the WAL backwards and use the most-recent frame for each page; the older frames stay in the file until SQLite **checkpoints** the WAL into the main `.db` (default trigger: ~1000 pages, ~4 MB at 4 KB page size, configurable via `wal_autocheckpoint`).
 
 When a message is retracted, two transactions hit the same page:
 
@@ -520,13 +520,13 @@ echo '{"op":"recent","limit":3}' | nc -U ~/Library/Application\ Support/imessage
 
 Wire format: newline-delimited JSON, one request → one response → server closes the connection. Legacy plaintext `ping` is still accepted for one release.
 
-The dispatcher is a hard allowlist of `ping`, `status`, and `recent`. Anything else (`restore`, `delete`, anything novel) returns:
+The dispatcher is a hard allowlist of `ping`, `status`, `recent`, `delete`, and `compact`. The two read-only ops (`ping`/`status`/`recent`) surface daemon state; `delete` removes a single recovery archive directory and `compact` drops the bulky `chat.db` family from one archive while keeping the recovered text + manifest. **Both `delete` and `compact` mutate files under `~/Library/Application Support/imessage-unsent/archives/` — they never touch the live `chat.db`.** The archive `id` is validated against an anchored regex (`^\d{4}-\d{2}-\d{2}T\d{6}Z-\d+$`) so it cannot traverse out of the archives directory. Any op outside the allowlist returns:
 
 ```json
-{"ok":false,"error":{"code":"read_only","message":"op X is not permitted: control server is read-only"}}
+{"ok":false,"error":{"code":"read_only","message":"op X is not permitted: ..."}}
 ```
 
-This is the IPC-boundary half of the Notify-only invariant — see [How the guardrail is enforced](#how-the-guardrail-is-enforced) for the file-layer half.
+The **live-`chat.db`** half of the Notify-only invariant still holds absolutely — no socket op (or any other code path) writes to `~/Library/Messages/chat.db`. See [How the guardrail is enforced](#how-the-guardrail-is-enforced) for the file-layer detail.
 
 ## Sanitized case study
 
@@ -596,7 +596,7 @@ If you find a code path that bypasses either layer, that's a bug — please file
 | `typedstream` (pip)   | optional  | `pip3 install --user typedstream`             |
 | `imessage-exporter`   | optional  | `cargo install imessage-exporter`             |
 
-Verified on macOS 15 (Sequoia, Darwin 24.x). The retraction feature itself shipped in macOS 13 / iOS 16, so the schema-level technique is expected to apply from macOS 13+ — but column semantics (specifically the `date_retracted` vs `date_edited` distinction documented above) have only been confirmed on Darwin 24.x in this codebase. Validate before relying on this on earlier macOS versions.
+Verified on macOS 15 (Sequoia, Darwin 24.x). The retraction feature itself shipped in macOS 13 / iOS 16, so the schema-level technique is expected to apply from macOS 13+ — but column semantics (specifically the `date_retracted` vs `date_edited` distinction documented above) have only been confirmed on Darwin 24.x in this codebase. It has **not** been re-verified on macOS 26 / Darwin 25 or later, where the retraction predicate is assumed-but-unproven. Validate the `date_edited != 0 AND is_empty = 1` predicate against a known unsend before relying on this on any macOS version other than Sequoia / Darwin 24.x.
 
 ## Privacy and legal
 

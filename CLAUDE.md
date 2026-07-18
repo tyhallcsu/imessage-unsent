@@ -65,8 +65,8 @@ make doctor
 - **TCC tracks Full Disk Access per binary.** `make daemon-install` rebuilds `imu-watcher` with a new inode/cdhash, so an existing FDA grant for the previous binary doesn't carry over. Symptom: daemon `stat`s WAL fine (path-based metadata is leniently allowed) but `open(2)` on `chat.db` fails with `authorization denied`. Fix: System Settings → Privacy & Security → Full Disk Access → toggle `imu-watcher` OFF then back ON, then `launchctl kickstart -k gui/$(id -u)/com.imu.watcher`.
 - **FSEvents on `~/Library/Messages` is unreliable.** It misses many `chat.db-wal` writes. The 1 Hz polling fallback in `FSWatcher.swift` (issue #59 / PR #60) catches what FSEvents drops. Don't remove it.
 - **The pre-retract WAL page can be checkpointed away before the daemon snapshots it.** Long messages and slow unsends fail more often. Issue #67 / PR #68 add a rolling snapshot buffer at `~/Library/Application Support/imessage-unsent/wal-history/` that mitigates this. The README has a "Limitations" section that's honest about what the tool cannot recover.
-- **`RecoveryNotifier.notify` throws an uncaught NSException after every successful recovery.** Issue #65, currently un-fixed. `KeepAlive=true` in the LaunchAgent plist masks it (launchd respawns within ~5 s) so recoveries land on disk; the in-memory counters reset is the visible symptom.
-- **Two bundle IDs, two notification grants.** The GUI and the daemon are separate processes with separate TCC entries. PR #62 wired the GUI's "Enable notifications" button. The daemon's authorization is independent and is what blows up in issue #65 — even after the GUI is granted, the daemon is unauthorized and `UNUserNotificationCenter` throws.
+- **`RecoveryNotifier` used to crash the daemon with an uncaught NSException (issue #65) — this is now FIXED** (PR #70 gates on `getNotificationSettings`; PR #87 skips `UNUserNotificationCenter` entirely from non-bundled binaries via a `Bundle.main.bundleIdentifier` guard). The daemon deliberately never posts native notifications now; the GUI owns notification delivery (#94). Don't reintroduce a `UNUserNotificationCenter.current()` call on the daemon's non-bundled path.
+- **Two bundle IDs, two notification grants.** The GUI and the daemon are separate processes with separate TCC entries. PR #62 wired the GUI's "Enable notifications" button. The daemon's authorization is independent — which is why the daemon defers all native notifications to the GUI rather than posting them itself.
 - **Tests use `/Users/example` and `/Users/test` as synthetic stand-ins.** Do not replace with real paths in tests, even your own — those strings are checked in `tests/bats/`.
 
 ## Where to look
@@ -77,18 +77,19 @@ README.md                                  # project intro + Limitations section
 SECURITY.md                                # threat model + Notify-only invariant
 docs/architecture.md                       # high-level component diagrams
 docs/recovery-vectors.md                   # per-vector deep-dive + failure modes
-docs/legal-and-ethics.md                   # CFAA / ECPA / Apple ToS / GDPR posture
+docs/FABLE5-ULTRACODE-REVIEW.md            # 2026-07 evidence-based review + findings
 docs/release-process.md                    # how to cut a release
+# NOTE: docs/legal-and-ethics.md does not exist yet — planned in #22/#56 (unmerged)
 docs/code-signing.md                       # Apple Developer ID pipeline
 scripts/recover.sh                         # entry point for the bash pipeline
 scripts/lib/                               # vector helpers (snapshot/scan/wal/decode)
 scripts/lib/wal_extract.py                 # the byte-forensics core
 scripts/lib/wal_merge_candidates.py        # PR #68 — merges live + history WAL hits
 daemon/Sources/IMUCore/FSWatcher.swift     # FSEvents + polling watch (PR #60)
-daemon/Sources/IMUCore/WALSnapshotter.swift # rolling buffer (PR #68 — pending)
+daemon/Sources/IMUCore/WALSnapshotter.swift # rolling buffer (issue #67 / PR #68, merged)
 daemon/Sources/IMUCore/RetractionDetector.swift # SQL probe + state store
 daemon/Sources/IMUCore/ArchivePipeline.swift   # archive each event + run recover.sh
-daemon/Sources/IMUCore/ControlServer.swift # ping/status/recent/delete socket
+daemon/Sources/IMUCore/ControlServer.swift # ping/status/recent/delete/compact socket
 daemon/Sources/IMUCore/DaemonStatusBoard.swift # in-memory status surfaced to GUI
 daemon/Sources/imu-watcher/main.swift      # WatcherDaemon entry point
 gui/Sources/IMUMenuBarCore/Services/HealthChecker.swift # App Doctor checks
@@ -99,20 +100,24 @@ gui/Sources/IMUMenuBar/Views/SettingsWindow.swift       # Settings UI
 
 ## Currently in flight
 
-Always `gh pr list --state open` for the live state, but at the time of writing:
+Always `gh pr list --state open` for the live state. As of 2026-07-17, v0.1–v0.3
+milestones are fully delivered (latest tag `v0.3.0-rc1`; app is `iMessage Unsent.app`,
+bundle `com.imessage-unsent.app`). The PRs that were "in flight" in the first draft of
+this file (#55/#56/#63/#64/#66/#68) are all now merged or closed — do not treat them as open.
 
-| PR | What it does | Why it matters |
-|---|---|---|
-| #55 | chore: surface signing status in release notes | release-cosmetics |
-| #56 | docs: legal & ethics statement (CFAA / ECPA / Apple ToS / GDPR) | required-before-public-release-style content |
-| #63 | feat(gui): About window | minor UI |
-| #64 | feat(daemon+gui): surface daemon's chat.db FDA status in App Doctor + Settings | makes the FDA-refresh-after-rebuild case visible without reading the daemon log |
-| #66 | ci(release): split workflow — only build/sign/notarize on macOS | ~62% fewer billable Actions minutes per release |
-| #68 | feat(daemon+docs): rolling WAL snapshot buffer for slow-unsend recovery | the difference-maker for long-message recovery; closes #67 |
+Open PR:
+- **#107** — `feat`: recover prior versions of *edited* (non-retracted) messages from the
+  `message_summary_info` `ec` chain (closes #106). Separate CLI (`scripts/edit-history.py`).
 
 Open issues to watch:
-- **#65** — `RecoveryNotifier` NSException crash. Reliable repro, no PR yet. Suggested fix in the issue body: gate notify behind a `getNotificationSettings` authorization probe.
-- **#16** — Restore mode (write to chat.db). Feature-flagged off; needs consent-flow UI before unflagging.
+- **#108–#116** — findings from the 2026-07 review (`docs/FABLE5-ULTRACODE-REVIEW.md`):
+  daemon subprocess pipe-deadlock/timeout (#108), corrupt-`state.json` crash loop (#109),
+  WAL extractor long-message window (#110), size-only WAL change detection (#111),
+  CLI `/tmp` hardening (#112), control-socket doc drift (#113), docs reconciliation (#114),
+  release-workflow hardening (#115), Makefile lint gap (#116).
+- **#96** — audit/findings tracker (post-v0.2.1-rc1).
+- **#16 / #15** — Restore mode research (write to chat.db). `ethics-review-required`,
+  feature-flagged off; needs consent-flow UI before unflagging.
 - **#26** — Roadmap (pinned). Phase ordering and milestone dependencies live here.
 
 ## Etiquette for the next agent
@@ -121,4 +126,4 @@ Open issues to watch:
 - Run `make rc-smoke VERSION=v0.0.0-smoke` locally before pushing — same checks CI runs, ~30 s on a warm cache.
 - If you add a new daemon-side recovery vector, also update `docs/recovery-vectors.md` with its failure modes. We disclose limitations honestly; the README has a "Limitations" section and the per-vector doc has a failure-mode table.
 - If you find a real legal name, work email, or other PII anywhere in the tree, **stop and surface it before committing.** History was rewritten once; we'd rather not do it twice.
-- The `RecoveryNotifier` crash (#65) is the single bug that, if fixed, would most improve the daemon's observability. Good first task if you're looking for one.
+- The highest-leverage open reliability work is the daemon-death cluster from the 2026-07 review: the `ArchivePipeline` subprocess pipe-deadlock + missing timeout (#108) and the corrupt-`state.json` crash loop (#109). See `docs/FABLE5-ULTRACODE-REVIEW.md` §6.
