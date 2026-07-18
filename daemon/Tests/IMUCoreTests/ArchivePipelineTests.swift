@@ -93,6 +93,103 @@ final class ArchivePipelineTests: XCTestCase {
     XCTAssertTrue(remainingArchives.contains(complete.archiveDir.lastPathComponent))
   }
 
+  func testArchivePipelineCapturesChattyRecoveryWithoutDeadlock() throws {
+    let root = try makeTemporaryDirectory()
+    defer {
+      try? FileManager.default.removeItem(at: root)
+    }
+
+    let liveDir = root.appendingPathComponent("Messages", isDirectory: true)
+    let archivesDir = root.appendingPathComponent("archives", isDirectory: true)
+    try FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+    try Data("synthetic db".utf8).write(to: liveDir.appendingPathComponent("chat.db", isDirectory: false))
+    // Emits ~200 KB to stderr (past the ~64 KB pipe buffer) before its JSON —
+    // the exact shape that deadlocked the old drain-after-wait implementation.
+    let chatty = try makeExecutableScript(
+      in: root,
+      name: "recover-chatty.sh",
+      body: """
+      #!/usr/bin/env bash
+      head -c 200000 /dev/zero | tr '\\0' 'X' >&2
+      echo '{"schema_version":1,"recovered":{"text_b64":"aGVsbG8="}}'
+      exit 0
+      """
+    )
+    let pipeline = ArchivePipeline(
+      liveMessagesDir: liveDir,
+      archivesDir: archivesDir,
+      recoverScriptURL: chatty,
+      retentionLimit: 100
+    )
+
+    let started = Date()
+    let complete = try pipeline.archive(
+      event: RetractionDetected(rowid: 7, guid: "guid-7", handle: "+15550007000", editedAt: 7),
+      detectedAt: Date(timeIntervalSince1970: 1_800_000_000)
+    )
+    let elapsed = Date().timeIntervalSince(started)
+
+    XCTAssertTrue(complete.recovered)
+    XCTAssertLessThan(elapsed, 20, "chatty recovery must not deadlock")
+    let recovery = try readJSON(complete.archiveDir.appendingPathComponent("recovery.json"))
+    let recovered = try XCTUnwrap(recovery["recovered"] as? [String: Any])
+    XCTAssertEqual(recovered["text_b64"] as? String, "aGVsbG8=")
+    let stderrData = try Data(contentsOf: complete.archiveDir.appendingPathComponent("recovery.stderr.txt"))
+    XCTAssertEqual(stderrData.count, 200_000, "full stderr captured for diagnostics")
+  }
+
+  func testArchivePipelineTimesOutHungRecoveryAndReportsScriptError() throws {
+    let root = try makeTemporaryDirectory()
+    defer {
+      try? FileManager.default.removeItem(at: root)
+    }
+
+    let liveDir = root.appendingPathComponent("Messages", isDirectory: true)
+    let archivesDir = root.appendingPathComponent("archives", isDirectory: true)
+    try FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+    try Data("synthetic db".utf8).write(to: liveDir.appendingPathComponent("chat.db", isDirectory: false))
+    let doneMarker = root.appendingPathComponent("recovery-done", isDirectory: false)
+    let hang = try makeExecutableScript(
+      in: root,
+      name: "recover-hang.sh",
+      body: """
+      #!/usr/bin/env bash
+      sleep 10
+      echo done > "\(doneMarker.path)"
+      """
+    )
+    let pipeline = ArchivePipeline(
+      liveMessagesDir: liveDir,
+      archivesDir: archivesDir,
+      recoverScriptURL: hang,
+      retentionLimit: 100,
+      recoveryTimeout: 1,
+      terminationGrace: 0.5
+    )
+
+    let started = Date()
+    let complete = try pipeline.archive(
+      event: RetractionDetected(rowid: 8, guid: "guid-8", handle: "+15550008000", editedAt: 8),
+      detectedAt: Date(timeIntervalSince1970: 1_800_000_000)
+    )
+    let elapsed = Date().timeIntervalSince(started)
+
+    XCTAssertFalse(complete.recovered)
+    XCTAssertLessThan(elapsed, 8, "hung recovery must be bounded, not block the watcher forever")
+    XCTAssertFalse(
+      FileManager.default.fileExists(atPath: doneMarker.path),
+      "hung recovery must be killed before it finishes"
+    )
+    let manifest = try readJSON(complete.archiveDir.appendingPathComponent("manifest.json"))
+    let recovery = try XCTUnwrap(manifest["recovery"] as? [String: Any])
+    XCTAssertEqual(recovery["failure_category"] as? String, "script_error")
+    XCTAssertEqual(recovery["recovered"] as? Bool, false)
+    XCTAssertTrue(
+      (recovery["error"] as? String)?.contains("timed out") == true,
+      "error should explain the timeout"
+    )
+  }
+
   private func copyFixtureDBFamily(to destination: URL) throws {
     let fixtures = destination
       .deletingLastPathComponent()
