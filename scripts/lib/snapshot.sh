@@ -30,6 +30,9 @@ imu_snapshot() {
     destination="$work_dir/$name"
     if [[ -f "$source" ]]; then
       cp "$source" "$destination"
+      # The snapshot is a full copy of chat.db (every message). Force it
+      # owner-only regardless of the source mode or cp/umask interplay (#112).
+      chmod 600 "$destination" 2>/dev/null || true
       printf "%s\n" "$destination"
     fi
   done
