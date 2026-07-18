@@ -15,6 +15,12 @@ public struct ArchivePipeline {
   public let archivesDir: URL
   public let recoverScriptURL: URL
   public let retentionLimit: Int
+  /// Wall-clock budget for a single `recover.sh` run before it is terminated.
+  public let recoveryTimeout: TimeInterval
+  /// Grace period after SIGTERM (and after SIGKILL) before we stop waiting.
+  public let terminationGrace: TimeInterval
+  /// Per-stream cap on captured subprocess output, in bytes.
+  public let outputByteCap: Int
 
   private let fileManager: FileManager
 
@@ -23,12 +29,18 @@ public struct ArchivePipeline {
     archivesDir: URL,
     recoverScriptURL: URL = defaultRecoverScriptURL(),
     retentionLimit: Int = 100,
+    recoveryTimeout: TimeInterval = 120,
+    terminationGrace: TimeInterval = 5,
+    outputByteCap: Int = 4 * 1024 * 1024,
     fileManager: FileManager = .default
   ) {
     self.liveMessagesDir = liveMessagesDir
     self.archivesDir = archivesDir
     self.recoverScriptURL = recoverScriptURL
     self.retentionLimit = retentionLimit
+    self.recoveryTimeout = recoveryTimeout
+    self.terminationGrace = terminationGrace
+    self.outputByteCap = outputByteCap
     self.fileManager = fileManager
   }
 
@@ -139,24 +151,27 @@ public struct ArchivePipeline {
     let startedAt = Date()
     let recoveryURL = archiveDir.appendingPathComponent("recovery.json", isDirectory: false)
     let stderrURL = archiveDir.appendingPathComponent("recovery.stderr.txt", isDirectory: false)
-    let process = Process()
-    let stdout = Pipe()
-    let stderr = Pipe()
-    process.executableURL = recoverScriptURL
-    process.arguments = [
-      "--handle", event.handle,
-      "--rowid", String(event.rowid),
-      "--json",
-      "--work", archiveDir.path
-    ]
-    process.standardOutput = stdout
-    process.standardError = stderr
 
-    do {
-      try process.run()
-      process.waitUntilExit()
-    } catch {
-      let diagnostic = recoveryDiagnosticJSON(exitCode: nil, error: error.localizedDescription)
+    // Drains stdout/stderr concurrently with the wait (no pipe deadlock) and
+    // enforces a bounded timeout with SIGTERM → grace → SIGKILL escalation.
+    let runner = BoundedProcessRunner(
+      timeout: recoveryTimeout,
+      terminationGrace: terminationGrace,
+      outputByteCap: outputByteCap
+    )
+    let result = runner.run(
+      executableURL: recoverScriptURL,
+      arguments: [
+        "--handle", event.handle,
+        "--rowid", String(event.rowid),
+        "--json",
+        "--work", archiveDir.path
+      ]
+    )
+
+    switch result.outcome {
+    case let .launchFailed(message):
+      let diagnostic = recoveryDiagnosticJSON(exitCode: nil, error: message)
       try? diagnostic.write(to: recoveryURL, options: .atomic)
       return RecoveryRun(
         manifest: ArchiveRecovery(
@@ -164,39 +179,64 @@ public struct ArchivePipeline {
           finishedAt: isoString(Date()),
           exitCode: nil,
           recovered: false,
-          error: error.localizedDescription,
+          error: message,
           failureCategory: .scriptError
         )
       )
-    }
 
-    let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
-    let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
-    try? stderrData.write(to: stderrURL, options: .atomic)
-
-    let outputData: Data
-    if stdoutData.isEmpty {
-      outputData = recoveryDiagnosticJSON(
-        exitCode: Int(process.terminationStatus),
-        error: String(data: stderrData, encoding: .utf8) ?? "recover.sh produced no JSON"
+    case .timedOut:
+      persistStderr(result, to: stderrURL)
+      let message = "recover.sh timed out after \(Int(recoveryTimeout))s and was terminated"
+      let diagnostic = recoveryDiagnosticJSON(exitCode: nil, error: message)
+      try? diagnostic.write(to: recoveryURL, options: .atomic)
+      return RecoveryRun(
+        manifest: ArchiveRecovery(
+          startedAt: isoString(startedAt),
+          finishedAt: isoString(Date()),
+          exitCode: nil,
+          recovered: false,
+          error: message,
+          failureCategory: .scriptError
+        )
       )
-    } else {
-      outputData = stdoutData
-    }
-    try? outputData.write(to: recoveryURL, options: .atomic)
 
-    let recovered = recoveryJSONHasText(outputData)
-    let failureCategory = recovered ? nil : recoveryJSONFailureCategory(outputData)
-    return RecoveryRun(
-      manifest: ArchiveRecovery(
-        startedAt: isoString(startedAt),
-        finishedAt: isoString(Date()),
-        exitCode: Int(process.terminationStatus),
-        recovered: recovered,
-        error: process.terminationStatus == 0 ? nil : "recover.sh exited \(process.terminationStatus)",
-        failureCategory: failureCategory
+    case let .exited(code):
+      persistStderr(result, to: stderrURL)
+      let outputData: Data
+      if result.stdout.isEmpty {
+        outputData = recoveryDiagnosticJSON(
+          exitCode: Int(code),
+          error: String(data: result.stderr, encoding: .utf8) ?? "recover.sh produced no JSON"
+        )
+      } else {
+        outputData = result.stdout
+      }
+      try? outputData.write(to: recoveryURL, options: .atomic)
+
+      let recovered = recoveryJSONHasText(outputData)
+      let failureCategory = recovered ? nil : recoveryJSONFailureCategory(outputData)
+      return RecoveryRun(
+        manifest: ArchiveRecovery(
+          startedAt: isoString(startedAt),
+          finishedAt: isoString(Date()),
+          exitCode: Int(code),
+          recovered: recovered,
+          error: code == 0 ? nil : "recover.sh exited \(code)",
+          failureCategory: failureCategory
+        )
       )
-    )
+    }
+  }
+
+  /// Persists captured stderr for diagnostics, appending a marker if the byte
+  /// cap truncated it. The archive directory is private (0700), so this stays
+  /// local — no subprocess output is ever emitted to CI logs.
+  private func persistStderr(_ result: BoundedProcessRunner.Result, to url: URL) {
+    var data = result.stderr
+    if result.stderrTruncated {
+      data.append(Data("\n[imu: stderr truncated at \(outputByteCap) bytes]\n".utf8))
+    }
+    try? data.write(to: url, options: .atomic)
   }
 
   private func writeManifest(_ manifest: ArchiveManifest, to archiveDir: URL) throws {
