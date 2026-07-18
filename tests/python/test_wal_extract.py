@@ -16,8 +16,6 @@ import importlib.util
 import sys
 from pathlib import Path
 
-import pytest
-
 GUID = "00000000-0000-0000-0000-0000000000AA"  # 36 bytes, synthetic
 # One control byte stands in for the SQLite record header between the GUID and
 # the inline text; extract_candidates strips leading control bytes.
