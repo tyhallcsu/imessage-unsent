@@ -4,6 +4,7 @@ BATS := $(shell command -v bats 2>/dev/null)
 # Glob so newly-added modules are linted/compiled by default. Previously a
 # hardcoded list silently skipped shipped code (e.g. scripts/lib/wal_merge_candidates.py
 # and tests/python/test_json_report.py were never ruff/py_compile checked). See #116.
+# The glob already covers this PR's scripts/edit-history.py + tests/python/test_edit_history.py.
 PYTHON_SOURCES := $(wildcard scripts/*.py scripts/lib/*.py tests/python/*.py)
 SHELL_SOURCES := scripts/*.sh scripts/lib/*.sh tests/fixtures/*.sh tests/bats/helpers.bash
 
