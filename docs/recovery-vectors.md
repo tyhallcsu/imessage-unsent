@@ -149,7 +149,7 @@ Vector 7 is intentionally a separate CLI tool, not a step in `recover.sh`, becau
 - `recover.sh` logs WAL stats: file size, approximate frame count `(WAL_SIZE - 32) / (24 + page_size)`.
 - `recover.sh` runs `grep -aob "$GUID" "$WAL"` to find every byte offset where the candidate's GUID appears.
 - `recover.sh` calls [`imu_extract_from_wal "$WAL" "$GUID"`](../scripts/lib/wal.sh) (TSV output for the human log) and `imu_extract_from_wal_json` (used by `--json` and batch mode), both of which shell into [`scripts/lib/wal_extract.py`](../scripts/lib/wal_extract.py).
-- `wal_extract.py` for each GUID hit: skips the 36 GUID bytes, reads the next 512 bytes, scans forward for the typedstream magic `\x04\x0bstreamtyped` as a terminator, validates UTF-8, requires at least one printable char, and deduplicates candidates on the first 120 chars to collapse "same text from two frames."
+- `wal_extract.py` for each GUID hit: skips the 36 GUID bytes, reads the next `--window` bytes (default 8192), scans forward for the typedstream magic `\x04\x0bstreamtyped` as a terminator, validates UTF-8, requires at least one printable char, and deduplicates candidates on the first 120 chars to collapse "same text from two frames."
 
 **Reads:** `$WORK/chat.db-wal` (binary scan of the entire file).
 
@@ -166,7 +166,7 @@ Vector 7 is intentionally a separate CLI tool, not a step in `recover.sh`, becau
 - The on-disk row format puts the `text` column value inline immediately after the 36-byte ASCII GUID. That's the entire trick — no schema parsing required, just byte arithmetic.
 - The terminator `\x04\x0bstreamtyped` is the magic header of the *next* column (`attributedBody`'s typedstream), so the bytes between GUID-end and that magic are exactly the original `text`.
 - Multiple GUID hits in the WAL = multiple page images of the same message at different points in its life. Older frames have the pre-retraction text; newer frames have the post-retraction empty value. Dedup-by-prefix collapses identical recoveries from adjacent frames.
-- `wal_extract.py`'s 512-byte read window is a heuristic — it's much larger than any iMessage that fits in a single page row but small enough to keep the scan fast. If a future macOS version inlines text differently, this is the constant to revisit.
+- `wal_extract.py`'s read window (`--window`, default 8192 bytes) is a bounded heuristic. It was 512 bytes, which silently dropped any message whose terminator landed further out — i.e. exactly the long messages the tool most wants to recover (#110). 8 KB comfortably covers any message stored inline in a single SQLite leaf cell; the `otr.0.le` cross-check below trims any over-capture back to the true length, so a generous window is safe. When a GUID hit's text runs past the window, the extractor now logs a truncation warning to stderr instead of dropping it silently. Widen with `--window` if you have reason to expect a longer inline message.
 - The cross-check is: candidate length should match Vector 2's `otr.0.le`. The README's [byte-level walkthrough](../README.md#why-the-wal-vector-works-byte-level) shows the actual 95-byte recovery from the sanitized case study.
 - This is the file the daemon's `RetractionDetector` watches via FSEvents — see [`daemon/Sources/IMUCore/FSWatcher.swift`](../daemon/Sources/IMUCore/FSWatcher.swift) — so that the daemon can snapshot before SQLite checkpoints the retraction away.
 
