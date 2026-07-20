@@ -315,7 +315,7 @@ All High findings and the review's Medium reliability/security/release cluster a
 | **F-M6/M7/M8/M9** release-workflow hardening | env-passed dispatch input, tag checkout, artifact-name fix, version-drift guard | #125 | ✅ merged |
 | Edit-history recovery (#106) | read-only `edit-history.py` (msi `ec` chain) | #107 | ✅ merged |
 
-**New finding raised this pass:** an intermittent SIGTRAP crash in `ControlServerTests` during the *full* daemon suite (cross-test/socket-teardown race, pre-existing, not caused by any PR above) — tracked in **#124**.
+**New finding raised *and fixed* this pass (#124, PR #130):** an intermittent SIGTRAP crash in `ControlServerTests` during the *full* daemon suite. Root cause (ThreadSanitizer-confirmed): `ControlServer.stop()` closed the listen fd out from under a live accept `DispatchSourceRead`, and raced the `listenFD` field between the accept and lifecycle queues. Fixed by closing the fd from the source's cancel handler with a deterministic `stop()` barrier. Verified TSan-clean + 55 consecutive clean full-suite runs.
 
 **Still open (backlog / out of scope this pass):** F-M2 socket-doc/SECURITY reconciliation (partly covered by #118), F-M4/F-M5/F-M10 and the LOW cluster, the un-run GUI/accessibility and WAL-fuzz reviews (§12), and the ethics-gated Restore-mode/encryption work (#16/#25/#88).
 
