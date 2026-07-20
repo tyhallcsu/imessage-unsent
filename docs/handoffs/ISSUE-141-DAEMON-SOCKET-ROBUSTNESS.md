@@ -26,8 +26,8 @@
 | Base branch | `main` |
 | **Verified base SHA** | `ac672ff4d83dac8faef5f2be5193d4901c15c776` (merge-base with `origin/main`; branch was created from this and had **no commits** of its own before this checkpoint) |
 | Issue | https://github.com/tyhallcsu/imessage-unsent/issues/141 |
-| Draft PR | _to be appended after the PR is opened — see the final checkpoint report / PR body_ |
-| Checkpoint commit SHA | _to be appended after commit — this is the branch commit titled `wip(daemon): checkpoint #141 socket robustness for handoff`_ |
+| Draft PR | **#145** — https://github.com/tyhallcsu/imessage-unsent/pull/145 (draft, base `main`) |
+| Checkpoint commit SHA | `7e6cec40df471021bca3a8e1b6ab1bb4fdaa340c` (the `wip(daemon): checkpoint #141 …` commit carrying all code, tests, and this doc; a small docs-only follow-up commit may sit on top filling in these two refs) |
 
 > On the machine where this was authored the branch lived in a **locked git
 > worktree**; that is machine-local and irrelevant to you. On any other
