@@ -39,8 +39,10 @@ public final class ControlServer {
   private let clientQueue = DispatchQueue(label: "com.imu.control.client", attributes: .concurrent)
   private let clientSemaphore = DispatchSemaphore(value: 4)
 
-  private var listenFD: Int32 = -1
   private var acceptSource: DispatchSourceRead?
+  // Signaled by the accept source's cancel handler once the listen fd has been
+  // closed, so stop() can block until teardown is truly complete.
+  private var acceptCancelSemaphore: DispatchSemaphore?
   private var started = false
 
   public init(
@@ -127,12 +129,25 @@ public final class ControlServer {
 
       let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: acceptQueue)
       source.setEventHandler { [weak self] in
-        self?.acceptPendingConnections()
+        // Use the captured `fd`, never an instance field: reading a mutable
+        // `listenFD` off the accept queue while stop() rewrote it was a data
+        // race (#124, confirmed by ThreadSanitizer at the accept(2) call).
+        self?.acceptPendingConnections(listenFD: fd)
+      }
+      // Close the listen fd ONLY from the cancel handler. libdispatch guarantees
+      // this runs after the source is fully torn down (no in-flight or future
+      // event handlers), so the fd is never closed out from under a live
+      // DispatchSourceRead — that misuse is what traps (SIGTRAP) under fd reuse
+      // in the full test suite (#124). The semaphore lets stop() wait for it.
+      let cancelSemaphore = DispatchSemaphore(value: 0)
+      source.setCancelHandler {
+        Darwin.close(fd)
+        cancelSemaphore.signal()
       }
       source.resume()
 
-      listenFD = fd
       acceptSource = source
+      acceptCancelSemaphore = cancelSemaphore
       started = true
       logger?("control server listening path=\(path)")
     }
@@ -143,19 +158,24 @@ public final class ControlServer {
       guard started else {
         return
       }
-      acceptSource?.cancel()
-      acceptSource = nil
-      if listenFD >= 0 {
-        Darwin.close(listenFD)
-        listenFD = -1
-      }
-      _ = Darwin.unlink(socketPath.path)
       started = false
+      let source = acceptSource
+      let cancelSemaphore = acceptCancelSemaphore
+      acceptSource = nil
+      acceptCancelSemaphore = nil
+      _ = Darwin.unlink(socketPath.path)
+      // Cancel the accept source and wait (bounded) for its cancel handler to
+      // close the listen fd. This makes teardown deterministic and guarantees
+      // libdispatch is finished with the fd before it can be reused (#124).
+      source?.cancel()
+      if source != nil {
+        _ = cancelSemaphore?.wait(timeout: .now() + 2)
+      }
       logger?("control server stopped")
     }
   }
 
-  private func acceptPendingConnections() {
+  private func acceptPendingConnections(listenFD: Int32) {
     while true {
       var clientAddr = sockaddr()
       var clientLen = socklen_t(MemoryLayout<sockaddr>.size)
