@@ -253,3 +253,103 @@ final class DaemonBinaryE2ETests: XCTestCase {
     packageRoot().deletingLastPathComponent()
   }
 }
+
+// MARK: - CLI argv + single-instance guard (#141)
+
+extension DaemonBinaryE2ETests {
+  private var builtBinary: URL {
+    Self.packageRoot().appendingPathComponent(".build/debug/imu-watcher")
+  }
+
+  private var e2eSocketPath: URL {
+    fakeHome.appendingPathComponent(
+      "Library/Application Support/imessage-unsent/daemon.sock",
+      isDirectory: false
+    )
+  }
+
+  /// Runs the binary with `arguments` under the fake $HOME, bounded by a
+  /// watchdog so a regression back to "argv starts the daemon" fails the
+  /// test instead of hanging it.
+  private func runBinary(arguments: [String], timeout: TimeInterval) throws -> (status: Int32, stdout: String, stderr: String) {
+    let process = Process()
+    process.executableURL = builtBinary
+    process.arguments = arguments
+    var env = ProcessInfo.processInfo.environment
+    env["HOME"] = fakeHome.path
+    process.environment = env
+    let outPipe = Pipe()
+    let errPipe = Pipe()
+    process.standardOutput = outPipe
+    process.standardError = errPipe
+    try process.run()
+
+    let deadline = Date().addingTimeInterval(timeout)
+    while process.isRunning && Date() < deadline {
+      Thread.sleep(forTimeInterval: 0.05)
+    }
+    if process.isRunning {
+      kill(process.processIdentifier, SIGKILL)
+      process.waitUntilExit()
+      XCTFail("imu-watcher \(arguments.joined(separator: " ")) did not exit within \(timeout)s — argv fell through to daemon.run()?")
+    }
+    let stdout = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    return (process.terminationStatus, stdout, stderr)
+  }
+
+  func testVersionFlagPrintsVersionAndDoesNotStartADaemon() throws {
+    try XCTSkipUnless(
+      FileManager.default.fileExists(atPath: builtBinary.path),
+      "imu-watcher must be built first (run: swift build --package-path daemon)"
+    )
+
+    let result = try runBinary(arguments: ["--version"], timeout: 10)
+
+    XCTAssertEqual(result.status, 0)
+    XCTAssertEqual(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines), imuDaemonVersion)
+    XCTAssertFalse(
+      FileManager.default.fileExists(atPath: e2eSocketPath.path),
+      "--version must not create a control socket"
+    )
+  }
+
+  func testUnknownArgumentExitsWithUsageAndDoesNotStartADaemon() throws {
+    try XCTSkipUnless(
+      FileManager.default.fileExists(atPath: builtBinary.path),
+      "imu-watcher must be built first (run: swift build --package-path daemon)"
+    )
+
+    let result = try runBinary(arguments: ["--bogus"], timeout: 10)
+
+    XCTAssertEqual(result.status, 2)
+    XCTAssertTrue(result.stderr.contains("unknown argument"), "stderr was: \(result.stderr)")
+    XCTAssertTrue(result.stderr.contains("usage:"), "stderr was: \(result.stderr)")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: e2eSocketPath.path))
+  }
+
+  func testSecondInstanceRefusesToStartWhileFirstHoldsTheLock() throws {
+    try XCTSkipUnless(
+      FileManager.default.fileExists(atPath: builtBinary.path),
+      "imu-watcher must be built first (run: swift build --package-path daemon)"
+    )
+
+    try launchDaemon(binary: builtBinary)
+    try waitFor("daemon socket", deadline: 10) {
+      FileManager.default.fileExists(atPath: self.e2eSocketPath.path)
+    }
+
+    let second = try runBinary(arguments: [], timeout: 10)
+
+    XCTAssertEqual(second.status, 1, "second instance must refuse to start; stderr: \(second.stderr)")
+    XCTAssertTrue(
+      second.stderr.contains("another imu-watcher instance"),
+      "stderr was: \(second.stderr)"
+    )
+
+    // The first instance is untouched: socket file still present and answering.
+    XCTAssertTrue(FileManager.default.fileExists(atPath: e2eSocketPath.path))
+    let ping = try sendRequest(#"{"op":"ping"}"#, to: e2eSocketPath)
+    XCTAssertEqual(ping["ok"] as? Bool, true)
+  }
+}

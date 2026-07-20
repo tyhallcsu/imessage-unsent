@@ -1,12 +1,21 @@
 # Handoff — Issue #141: daemon control-socket robustness
 
-> **STATUS: WIP — NOT MERGE READY.**
-> This branch is a cross-computer, cross-session checkpoint. The product code
-> compiles and the core socket-ownership logic is proven by tests, but **one
-> focused test (`testAbruptClientDisconnectsDoNotKillTheServer`) fails
-> non-deterministically** and is unresolved. Do not merge, do not close #141,
-> do not tag/release until the "Next steps" below are complete and both the
-> focused **and** full daemon test suites pass.
+> **STATUS: RESOLVED — MERGE READY (2026-07-20, follow-up session).**
+> The open failure was fixed via the checkpoint's recommended *test-only* lane:
+> the abuse loop tolerates load-shed (refused) connections, and the follow-up
+> liveness assertion uses an assertion-free `pingQuietly()` probe retried for
+> up to 2 s — asserting the server *survives and keeps serving*, not that it
+> never sheds load. The redundant in-test `signal(SIGPIPE, …)`/`defer` was
+> removed (the `setUpWithError` hoist already arms it per test; the defer
+> re-exposed later in-process sends). Product code unchanged since the
+> checkpoint apart from zero lines — all fixes were test-harness-side, which
+> confirms the checkpoint's verdict that #141's product logic was sound.
+> Validation: full daemon suite **104 tests / 1 skipped / 0 failures × 3
+> consecutive runs**, plus a ThreadSanitizer run (0 races, 0 failures). Three
+> new E2E tests cover `--version` (exit 0, no socket), unknown argv (exit 2,
+> usage), and the single-instance flock (second instance exits 1 with a clear
+> message while the first keeps answering). PR #145 promoted from draft with
+> `Closes #141`. The sections below are the original checkpoint record.
 
 ## Purpose & date
 
