@@ -414,6 +414,146 @@ final class RetractionDetectorTests: XCTestCase {
     let stateURL: URL
   }
 
+  // MARK: - Retry semantics (#142 / F-M4)
+
+  func testFailedEventIsRedetectedAfterMarkProcessed() throws {
+    let fixture = try makeDetectorFixture()
+    defer {
+      try? FileManager.default.removeItem(at: fixture.directory)
+    }
+
+    try insertRetraction(
+      into: fixture.chatDBURL,
+      guid: "synthetic-guid-retry",
+      handleID: 1,
+      dateEdited: 1_000
+    )
+
+    let detector = try RetractionDetector(
+      chatDBURL: fixture.chatDBURL,
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      maxAttempts: 3
+    )
+
+    let events = try detector.detect()
+    XCTAssertEqual(events.count, 1)
+
+    // recover.sh found nothing → markFailed below the ceiling, then the
+    // daemon loop marks the batch processed. The event must stay
+    // re-detectable — the old high-water advance excluded it forever.
+    try detector.markFailed(guid: "synthetic-guid-retry")
+    try detector.markProcessed(events)
+
+    XCTAssertEqual(
+      try detector.detect().map(\.guid),
+      ["synthetic-guid-retry"],
+      "an event with retry attempts left must be re-detected after markProcessed"
+    )
+  }
+
+  func testMixedBatchDoesNotStarveOlderFailedEvent() throws {
+    let fixture = try makeDetectorFixture()
+    defer {
+      try? FileManager.default.removeItem(at: fixture.directory)
+    }
+
+    try insertRetractions(
+      into: fixture.chatDBURL,
+      rows: [
+        (guid: "synthetic-older-failed", handleID: 1, dateEdited: 1_000),
+        (guid: "synthetic-newer-recovered", handleID: 1, dateEdited: 2_000)
+      ]
+    )
+
+    let detector = try RetractionDetector(
+      chatDBURL: fixture.chatDBURL,
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      maxAttempts: 3
+    )
+
+    let events = try detector.detect()
+    XCTAssertEqual(events.count, 2)
+
+    try detector.markFailed(guid: "synthetic-older-failed")
+    try detector.markRecovered(guid: "synthetic-newer-recovered")
+    try detector.markProcessed(events)
+
+    // The newer success must not drag the high-water past the older
+    // failure; the success itself stays deduped via processedGUIDs.
+    XCTAssertEqual(
+      try detector.detect().map(\.guid),
+      ["synthetic-older-failed"],
+      "a newer recovered event must not starve an older event's retries"
+    )
+  }
+
+  func testHighWaterAdvancesFullyWhenAllEventsTerminal() throws {
+    let fixture = try makeDetectorFixture()
+    defer {
+      try? FileManager.default.removeItem(at: fixture.directory)
+    }
+
+    try insertRetractions(
+      into: fixture.chatDBURL,
+      rows: [
+        (guid: "synthetic-done-1", handleID: 1, dateEdited: 1_000),
+        (guid: "synthetic-done-2", handleID: 1, dateEdited: 2_000)
+      ]
+    )
+
+    let detector = try RetractionDetector(
+      chatDBURL: fixture.chatDBURL,
+      stateStore: DetectorStateStore(url: fixture.stateURL)
+    )
+
+    let events = try detector.detect()
+    try detector.markRecovered(guid: "synthetic-done-1")
+    try detector.markRecovered(guid: "synthetic-done-2")
+    try detector.markProcessed(events)
+
+    XCTAssertEqual(try detector.detect(), [])
+    XCTAssertEqual(
+      try DetectorStateStore(url: fixture.stateURL).load().lastSeenDateEdited,
+      2_000,
+      "with no live retries the high-water must advance to the newest event"
+    )
+  }
+
+  func testCeilingFailureIsTerminalAndDoesNotHoldTheHighWaterBack() throws {
+    let fixture = try makeDetectorFixture()
+    defer {
+      try? FileManager.default.removeItem(at: fixture.directory)
+    }
+
+    try insertRetractions(
+      into: fixture.chatDBURL,
+      rows: [
+        (guid: "synthetic-exhausted", handleID: 1, dateEdited: 1_000),
+        (guid: "synthetic-fresh-recovered", handleID: 1, dateEdited: 2_000)
+      ]
+    )
+
+    let detector = try RetractionDetector(
+      chatDBURL: fixture.chatDBURL,
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      maxAttempts: 3
+    )
+
+    let events = try detector.detect()
+    try detector.markFailed(guid: "synthetic-exhausted")
+    try detector.markFailed(guid: "synthetic-exhausted")
+    try detector.markFailed(guid: "synthetic-exhausted")
+    try detector.markRecovered(guid: "synthetic-fresh-recovered")
+    try detector.markProcessed(events)
+
+    XCTAssertEqual(try detector.detect(), [], "exhausted + recovered are both terminal")
+    XCTAssertEqual(
+      try DetectorStateStore(url: fixture.stateURL).load().lastSeenDateEdited,
+      2_000,
+      "a ceiling failure has no live attempts and must not pin the high-water"
+    )
+  }
+
   private func makeDetectorFixture() throws -> DetectorFixture {
     let directory = try makeTemporaryDirectory()
     let chatDBURL = directory.appendingPathComponent("chat.db", isDirectory: false)

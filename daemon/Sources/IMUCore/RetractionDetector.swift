@@ -191,11 +191,29 @@ public final class RetractionDetector {
   }
 
   public func markProcessed(_ events: [RetractionDetected]) throws {
-    guard let maxEditedAt = events.map(\.editedAt).max(), maxEditedAt > state.lastSeenDateEdited else {
+    guard let maxEditedAt = events.map(\.editedAt).max() else {
       return
     }
 
-    state.lastSeenDateEdited = maxEditedAt
+    // Never advance the high-water past a NON-terminal event — one that
+    // still carries a live attempt count (markFailed below the ceiling).
+    // The SQL filter is `date_edited > lastSeenDateEdited`, so advancing
+    // past it would exclude the event from every future detect() and the
+    // maxAttempts retry ceiling could never be reached (#142 / F-M4).
+    // Terminal events (markRecovered, or markFailed at the ceiling) have no
+    // attempt count and are deduped by processedGUIDs instead, so the mark
+    // can move past them freely.
+    let nonTerminalFloor = events
+      .filter { state.attemptCounts[$0.guid] != nil }
+      .map { $0.editedAt - 1 }
+      .min()
+
+    let newHighWater = nonTerminalFloor.map { min($0, maxEditedAt) } ?? maxEditedAt
+    guard newHighWater > state.lastSeenDateEdited else {
+      return
+    }
+
+    state.lastSeenDateEdited = newHighWater
     try stateStore.save(state)
   }
 
