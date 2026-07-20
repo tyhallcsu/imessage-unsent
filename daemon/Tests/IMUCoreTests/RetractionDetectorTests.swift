@@ -16,6 +16,32 @@ final class RetractionDetectorTests: XCTestCase {
     XCTAssertEqual(try store.load(), DetectorState(lastSeenDateEdited: 42))
   }
 
+  func testStateStoreSavesWithPrivatePermissions() throws {
+    let root = try makeTemporaryDirectory()
+    defer {
+      try? FileManager.default.removeItem(at: root)
+    }
+
+    // Nest under a fresh parent so save() is the thing that creates the dir.
+    let parent = root.appendingPathComponent("imessage-unsent", isDirectory: true)
+    let stateURL = parent.appendingPathComponent("state.json", isDirectory: false)
+    let store = DetectorStateStore(url: stateURL)
+
+    try store.save(DetectorState(lastSeenDateEdited: 1, processedGUIDs: ["g"]))
+
+    func mode(_ url: URL) throws -> Int {
+      let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+      return (attrs[.posixPermissions] as? NSNumber)?.intValue ?? -1
+    }
+    XCTAssertEqual(try mode(stateURL), 0o600, "state.json must be owner-only (0600)")
+    XCTAssertEqual(try mode(parent), 0o700, "state dir must be owner-only (0700)")
+
+    // A re-save (atomic replace) must reassert 0600, not inherit a laxer mode.
+    try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: stateURL.path)
+    try store.save(DetectorState(lastSeenDateEdited: 2))
+    XCTAssertEqual(try mode(stateURL), 0o600, "re-save must reassert 0600")
+  }
+
   func testStateStoreQuarantinesCorruptFileAndReturnsFreshState() throws {
     let directory = try makeTemporaryDirectory()
     defer {

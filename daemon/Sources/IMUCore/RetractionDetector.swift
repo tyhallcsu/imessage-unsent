@@ -101,13 +101,25 @@ public struct DetectorStateStore {
   }
 
   public func save(_ state: DetectorState) throws {
+    // state.json holds recovery metadata (processed message GUIDs + the
+    // date_edited high-water mark). Keep it private: 0700 dir, 0600 file, to
+    // match the 0700/0600 posture ArchivePipeline/WALSnapshotter already apply
+    // to archives and snapshots (issue #128). The `.atomic` write replaces the
+    // file via a fresh temp + rename, so the mode is reasserted after every
+    // save rather than relying on the pre-existing file's mode.
     let parent = url.deletingLastPathComponent()
-    try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+    let fileManager = FileManager.default
+    try fileManager.createDirectory(
+      at: parent,
+      withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700]
+    )
 
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     let data = try encoder.encode(state)
     try data.write(to: url, options: .atomic)
+    try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
   }
 }
 
