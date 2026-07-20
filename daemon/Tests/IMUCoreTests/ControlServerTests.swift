@@ -195,14 +195,40 @@ final class ControlServerTests: XCTestCase {
     XCTAssertEqual(error["code"] as? String, "not_found")
   }
 
+  /// Regression guard for #124: closing the listen fd out from under the accept
+  /// `DispatchSourceRead` trapped (SIGTRAP) under fd reuse. `stop()` now closes
+  /// the fd from the source's cancel handler and blocks until it completes, so
+  /// repeated start→ping→stop cycles must tear down cleanly and stay functional.
+  func testRepeatedStartStopCyclesTearDownCleanly() throws {
+    let cyclePath = workDir.appendingPathComponent("cycle.sock", isDirectory: false)
+    for _ in 0..<25 {
+      let cycleServer = ControlServer(
+        socketPath: cyclePath,
+        statusBoard: statusBoard,
+        historyReader: ArchiveHistoryReader(archivesDir: archivesDir),
+        version: "test-0.1",
+        dataDir: workDir,
+        notificationsShow: true
+      )
+      try cycleServer.start()
+      let response = try roundTrip(#"{"op":"ping"}"#, socketPath: cyclePath)
+      XCTAssertEqual(response["ok"] as? Bool, true)
+      // stop() is a deterministic barrier: it returns only after the cancel
+      // handler has closed the fd, so the next iteration's bind can't race it.
+      cycleServer.stop()
+      // Second stop() must be a safe no-op (idempotent teardown).
+      cycleServer.stop()
+    }
+  }
+
   // MARK: - Helpers
 
-  private func roundTrip(_ request: String) throws -> [String: Any] {
-    let data = try sendRequest(request: request)
+  private func roundTrip(_ request: String, socketPath overridePath: URL? = nil) throws -> [String: Any] {
+    let data = try sendRequest(request: request, socketPath: overridePath ?? socketPath)
     return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
   }
 
-  private func sendRequest(request: String) throws -> Data {
+  private func sendRequest(request: String, socketPath: URL) throws -> Data {
     let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
     XCTAssertGreaterThanOrEqual(fd, 0, "socket() failed")
     defer { Darwin.close(fd) }
