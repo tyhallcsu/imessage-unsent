@@ -119,3 +119,20 @@ final class ConfigFileStoreTests: XCTestCase {
     )
   }
 }
+
+extension ConfigFileStoreTests {
+  func testSaveWritesOwnerOnlyFilePermissions() throws {
+    // config.toml carries the webhook signing secret in plaintext — the
+    // saved file must be 0600 even though atomic writes replace the inode.
+    let url = workDir.appendingPathComponent("perms.toml")
+    let store = ConfigFileStore(configURL: url)
+    var config = SettingsConfig()
+    config.notifications.webhookSigningSecret = "not-a-real-secret"
+
+    try store.save(config)
+
+    let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+    let mode = (attrs[.posixPermissions] as? NSNumber)?.uint16Value ?? 0
+    XCTAssertEqual(mode & 0o777, 0o600)
+  }
+}

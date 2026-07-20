@@ -55,7 +55,7 @@ struct RecoveryRowView: View {
               .foregroundStyle(.secondary)
               .padding(.horizontal, 4)
               .padding(.vertical, 1)
-              .background(RoundedRectangle(cornerRadius: 3).fill(Color.gray.opacity(0.18)))
+              .background(RoundedRectangle(cornerRadius: 3).fill(.quaternary))
               .help("Snapshot files dropped to reclaim disk space; recovered text retained.")
           }
         }
@@ -66,6 +66,9 @@ struct RecoveryRowView: View {
     }
     .padding(.vertical, 4)
     .contentShape(Rectangle())
+    // One element per row for VoiceOver: "message, sender, time, status"
+    // instead of five separate stops.
+    .accessibilityElement(children: .combine)
   }
 
   private var titleLine: String {
@@ -85,6 +88,7 @@ struct RecoveryRowView: View {
         .resizable()
         .scaledToFill()
         .clipShape(Circle())
+        .accessibilityHidden(true)
     } else {
       ZStack {
         Circle().fill(Color.accentColor.opacity(0.18))

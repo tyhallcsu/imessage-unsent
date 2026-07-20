@@ -35,14 +35,16 @@ struct IMUMenuBarApp: App {
           model.start()
           appDelegate.startRecoveryWatcher(
             archivesDir: Self.archivesDir,
-            isEnabled: { [weak settingsModel] in settingsModel?.draft.notifications.show ?? true }
+            // Saved config, not the draft: unsaved Settings edits must not
+            // change live behavior (the pane promises Save-then-apply).
+            isEnabled: { [weak settingsModel] in settingsModel?.savedConfig.notifications.show ?? true }
           )
         }
         .onReceive(URLRouter.shared.publisher) { route in
           handle(route: route)
         }
     } label: {
-      StatusIconView(status: model.status)
+      StatusIconView(status: model.status, needsAttention: model.needsAttention)
     }
     .menuBarExtraStyle(.menu)
 
