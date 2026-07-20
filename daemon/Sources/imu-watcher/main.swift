@@ -2,6 +2,18 @@ import Dispatch
 import Foundation
 import IMUCore
 
+enum WatcherDaemonError: Error, LocalizedError {
+  case alreadyRunning(String)
+
+  var errorDescription: String? {
+    switch self {
+    case let .alreadyRunning(lockPath):
+      return "another imu-watcher instance holds \(lockPath) — "
+        + "is the LaunchAgent already loaded? (launchctl print gui/$(id -u)/com.imu.watcher)"
+    }
+  }
+}
+
 final class WatcherDaemon {
   private let queue = DispatchQueue(label: "com.imu.watcher.daemon")
   private let stopSemaphore = DispatchSemaphore(value: 0)
@@ -16,13 +28,31 @@ final class WatcherDaemon {
   private var controlServer: ControlServer?
   private var lastWalSize: Int64 = 0
   private var stopped = false
+  // Held (never closed) for the process lifetime — the flock IS the
+  // single-instance guard.
+  private var instanceLockFD: Int32 = -1
 
   func run() throws {
+    // A client that vanishes mid-response must surface as an EPIPE write
+    // error, not a fatal SIGPIPE (#141). SO_NOSIGPIPE on accepted fds is the
+    // primary guard; this covers any other fd the process ever writes.
+    signal(SIGPIPE, SIG_IGN)
+
     let configURL = defaultConfigURL()
     let config = try ConfigStore(url: configURL).load()
     let dataDir = expandTilde(config.dataDir)
     try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dataDir.path)
+
+    // Single-instance guard (#141): a hand-run `imu-watcher` next to the
+    // LaunchAgent used to steal the control socket and race state.json and
+    // the archives dir. flock is inherited by nothing and dies with us, so
+    // a crash can never wedge the lock.
+    let lockURL = dataDir.appendingPathComponent("daemon.lock", isDirectory: false)
+    instanceLockFD = open(lockURL.path, O_CREAT | O_WRONLY | O_CLOEXEC, 0o600)
+    guard instanceLockFD >= 0, flock(instanceLockFD, LOCK_EX | LOCK_NB) == 0 else {
+      throw WatcherDaemonError.alreadyRunning(lockURL.path)
+    }
     let archivesDir = dataDir.appendingPathComponent("archives", isDirectory: true)
     archivePipeline = ArchivePipeline(
       archivesDir: archivesDir,
@@ -368,13 +398,34 @@ private func appleEpochNanoseconds(date: Date = Date()) -> Int64 {
   Int64(date.timeIntervalSinceReferenceDate * 1_000_000_000)
 }
 
+let usageText = """
+usage: imu-watcher [--version | --help | --self-test]
+
+Runs the imessage-unsent watcher daemon (normally via the LaunchAgent).
+  --version    print the daemon version and exit
+  --help       print this help and exit
+  --self-test  run the synthetic detector self-test and exit
+"""
+
 let daemon = WatcherDaemon()
 
 do {
-  if CommandLine.arguments.contains("--self-test") {
-    try daemon.selfTest()
-  } else {
+  // Strict argv handling (#141): an unknown flag used to fall through to
+  // daemon.run() — `imu-watcher --version` started a SECOND daemon that
+  // stole the control socket from the LaunchAgent instance.
+  let arguments = Array(CommandLine.arguments.dropFirst())
+  switch arguments.first {
+  case nil:
     try daemon.run()
+  case "--self-test":
+    try daemon.selfTest()
+  case "--version":
+    print(imuDaemonVersion)
+  case "--help", "-h":
+    print(usageText)
+  case let .some(unknown):
+    fputs("imu-watcher: unknown argument '\(unknown)'\n\(usageText)\n", stderr)
+    exit(2)
   }
 } catch {
   fputs("imu-watcher error: \(error.localizedDescription)\n", stderr)
