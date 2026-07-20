@@ -74,9 +74,13 @@ DAEMON_REQUIRED_ENTRIES=(
 
 # Required entries inside the GUI .app zip, validated by `unzip -Z1`.
 # Note: bundle is "iMessage Unsent.app" (with space) — Apple convention.
+# AppIcon.icns is load-bearing: Finder/Dock branding AND the About window
+# read it from Contents/Resources (#137). If it leaves the package, this
+# gate must fail.
 GUI_REQUIRED_ENTRIES=(
   "iMessage Unsent.app/Contents/MacOS/IMUMenuBar"
   "iMessage Unsent.app/Contents/Info.plist"
+  "iMessage Unsent.app/Contents/Resources/AppIcon.icns"
 )
 
 # Validates a version string against the same regex build-release.sh uses.

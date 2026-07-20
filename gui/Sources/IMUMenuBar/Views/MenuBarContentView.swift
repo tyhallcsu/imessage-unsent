@@ -50,7 +50,7 @@ struct MenuBarContentView: View {
 
       Divider()
 
-      Button("About imessage-unsent…") {
+      Button("About iMessage Unsent…") {
         openAppURL("imu://about")
       }
       Button("Quit") {

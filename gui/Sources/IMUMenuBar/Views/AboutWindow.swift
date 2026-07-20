@@ -1,54 +1,71 @@
 import AppKit
+import IMUMenuBarCore
 import SwiftUI
 
 struct AboutWindow: View {
-  static let repoURL = URL(string: "https://github.com/tyhallcsu/imessage-unsent")!
-
   var body: some View {
-    VStack(spacing: 16) {
-      Image(systemName: "message.fill")
-        .resizable()
-        .aspectRatio(contentMode: .fit)
-        .frame(width: 84, height: 84)
-        .foregroundStyle(.tint)
-        .padding(.top, 24)
+    VStack(spacing: 0) {
+      appIconView
+        .padding(.top, 28)
 
-      VStack(spacing: 4) {
-        Text("imessage-unsent")
-          .font(.title2)
-          .fontWeight(.semibold)
+      Text(AboutInfo.productName())
+        .font(.title2.weight(.semibold))
+        .padding(.top, 14)
 
-        Text("Version \(versionString)")
-          .font(.callout)
-          .foregroundStyle(.secondary)
-          .monospacedDigit()
-      }
+      Text("Version \(AboutInfo.versionString())")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .monospacedDigit()
+        .textSelection(.enabled)
+        .padding(.top, 2)
 
-      VStack(spacing: 4) {
-        Text("Created by sharmanhall")
+      Text(AboutInfo.tagline)
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.top, 12)
+        .padding(.horizontal, 12)
+
+      Divider()
+        .padding(.horizontal, 40)
+        .padding(.vertical, 14)
+
+      VStack(spacing: 6) {
+        Text("Created by \(AboutInfo.creator)")
           .font(.callout)
-        Link(destination: AboutWindow.repoURL) {
-          HStack(spacing: 4) {
-            Image(systemName: "link")
-            Text("github.com/tyhallcsu/imessage-unsent")
-          }
-          .font(.callout)
+        Link(destination: AboutInfo.repoURL) {
+          Label("github.com/tyhallcsu/imessage-unsent", systemImage: "link")
+            .font(.callout)
         }
+        .accessibilityLabel("Open the imessage-unsent repository on GitHub")
       }
 
-      Spacer(minLength: 0)
+      VStack(spacing: 4) {
+        Label(AboutInfo.privacyLine, systemImage: "lock.shield")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Text(AboutInfo.licenseLine)
+          .font(.caption)
+          .foregroundStyle(.tertiary)
+      }
+      .padding(.top, 14)
+      .padding(.bottom, 20)
     }
-    .frame(width: 320, height: 280)
-    .padding()
+    .frame(width: 300)
+    .fixedSize()
   }
 
-  private var versionString: String {
-    let info = Bundle.main.infoDictionary
-    let short = info?["CFBundleShortVersionString"] as? String
-    let build = info?["CFBundleVersion"] as? String
-    if let short, let build, build != short {
-      return "\(short) (\(build))"
-    }
-    return short ?? build ?? "dev"
+  /// The bundled AppIcon.icns; NSImage picks the right representation for
+  /// the display scale so this stays crisp on Retina. Falls back to the
+  /// AppKit-provided application icon when the resource is missing (bare
+  /// `swift run` binaries) so the window never renders an empty region.
+  private var appIconView: some View {
+    Image(nsImage: AboutInfo.appIcon() ?? NSApp?.applicationIconImage ?? NSImage())
+      .resizable()
+      .interpolation(.high)
+      .aspectRatio(contentMode: .fit)
+      .frame(width: 96, height: 96)
+      .accessibilityHidden(true)
   }
 }

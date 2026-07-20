@@ -66,7 +66,7 @@ struct IMUMenuBarApp: App {
     }
     .handlesExternalEvents(matching: ["doctor"])
 
-    Window("About imessage-unsent", id: "about") {
+    Window("About iMessage Unsent", id: "about") {
       AboutWindow()
     }
     .windowResizability(.contentSize)
