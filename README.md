@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./assets/icon.svg" alt="imessage-unsent recovered message icon" width="96">
+<img src="./assets/MacOS_AppIcon_iMessage_Unsent.png" alt="imessage-unsent app icon" width="104">
 
 # imessage-unsent
 
@@ -11,7 +11,7 @@
 [![Stack: bash + python](https://img.shields.io/badge/Stack-bash%20%2B%20python3-yellow.svg)](#usage)
 [![Status: tactical](https://img.shields.io/badge/Status-tactical-orange.svg)](#limitations)
 
-<img src="./assets/hero.svg" alt="imessage-unsent hero artwork showing recovered message data emerging from chat.db-wal" width="920">
+<img src="./assets/readme-banner.png" alt="imessage-unsent README banner showing the app icon and WAL recovery flow" width="960">
 
 </div>
 
@@ -484,7 +484,7 @@ make icon            # regenerate AppIcon.icns from assets/MacOS_AppIcon_iMessag
 
 ### App icon
 
-The macOS app icon source lives at [`assets/MacOS_AppIcon_iMessage_Unsent.png`](assets/MacOS_AppIcon_iMessage_Unsent.png) (1254×1254 PNG, **RGBA with transparent corners outside the squircle**). It is converted to `AppIcon.icns` (10 standard sizes, 16²–1024²) by [`scripts/build-app-icon.sh`](scripts/build-app-icon.sh) using `sips` + `iconutil`. The generated `.icns` is gitignored under `gui/.build/icon/` and regenerated on every release / dev build — both `scripts/build-release.sh` (the `iMessage Unsent.app` produced by `make release` / `make rc-smoke`) and `script/build_and_run.sh` (`make gui-run`) invoke the generator and stage the icon into `iMessage Unsent.app/Contents/Resources/`. The bundle declares it via `CFBundleIconFile = AppIcon` in [`gui/Info.plist`](gui/Info.plist).
+The macOS app icon source used by the build lives at [`assets/MacOS_AppIcon_iMessage_Unsent.png`](assets/MacOS_AppIcon_iMessage_Unsent.png) (1254×1254 PNG, **RGBA with transparent corners outside the squircle**). Vector design exports also live under [`assets/new-svg/`](assets/new-svg/), but the app bundle path still converts the PNG to `AppIcon.icns` (10 standard sizes, 16²–1024²) via [`scripts/build-app-icon.sh`](scripts/build-app-icon.sh) using `sips` + `iconutil`. The generated `.icns` is gitignored under `gui/.build/icon/` and regenerated on every release / dev build — both `scripts/build-release.sh` (the `iMessage Unsent.app` produced by `make release` / `make rc-smoke`) and `script/build_and_run.sh` (`make gui-run`) invoke the generator and stage the icon into `iMessage Unsent.app/Contents/Resources/`. The bundle declares it via `CFBundleIconFile = AppIcon` in [`gui/Info.plist`](gui/Info.plist).
 
 If you replace the source PNG: it MUST be RGBA with alpha=0 outside the rounded-square artwork. An RGB-only PNG with a baked-in black background will render as a black square in Finder/Get Info, because `sips` and `iconutil` faithfully preserve whatever's in the source. Verify with `sips -g hasAlpha assets/MacOS_AppIcon_iMessage_Unsent.png` (must report `yes`).
 
