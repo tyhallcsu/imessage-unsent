@@ -103,6 +103,116 @@ final class MenuBarModelTests: XCTestCase {
     XCTAssertFalse(model.delete(id: "anything"))
     XCTAssertEqual(model.recentEntries.count, originalCount)
   }
+
+  // MARK: Full Disk Access + attention surfacing
+
+  func testFullDiskAccessDeniedOnlyWhenProbeSaysUnreadable() {
+    let model = MenuBarModel(
+      pinger: StubPinger(isUp: true),
+      statusProvider: { Self.statusInfo(chatDBReadable: false) }
+    )
+    model.refresh()
+
+    XCTAssertTrue(model.fullDiskAccessDenied)
+    XCTAssertTrue(model.needsAttention)
+  }
+
+  func testFullDiskAccessNotDeniedWhenProbeMissingOrHealthy() {
+    let healthy = MenuBarModel(
+      pinger: StubPinger(isUp: true),
+      statusProvider: { Self.statusInfo(chatDBReadable: true) }
+    )
+    healthy.refresh()
+    XCTAssertFalse(healthy.fullDiskAccessDenied)
+    XCTAssertFalse(healthy.needsAttention)
+
+    let probeless = MenuBarModel(
+      pinger: StubPinger(isUp: true),
+      statusProvider: { Self.statusInfo(chatDBReadable: nil) }
+    )
+    probeless.refresh()
+    XCTAssertFalse(probeless.fullDiskAccessDenied, "absent probe data must not read as denied")
+  }
+
+  func testNeedsAttentionWhenDaemonIsDown() {
+    let model = MenuBarModel(pinger: StubPinger(isUp: false))
+    model.refresh()
+
+    XCTAssertTrue(model.needsAttention)
+    XCTAssertFalse(model.fullDiskAccessDenied)
+  }
+
+  // MARK: Action-error surfacing (silent-failure regression tests)
+
+  func testFailedDeleteSurfacesLastActionError() {
+    let model = MenuBarModel(
+      pinger: StubPinger(isUp: true),
+      archiveDeleter: StubArchiveDeleter(succeed: false)
+    )
+
+    XCTAssertFalse(model.delete(id: "gone"))
+    XCTAssertNotNil(model.lastActionError)
+  }
+
+  func testSuccessfulDeleteClearsLastActionError() {
+    let failing = StubArchiveDeleter(succeed: false)
+    let model = MenuBarModel(
+      pinger: StubPinger(isUp: true),
+      archiveDeleter: failing
+    )
+    _ = model.delete(id: "gone")
+    XCTAssertNotNil(model.lastActionError)
+
+    let succeeding = MenuBarModel(
+      pinger: StubPinger(isUp: true),
+      archiveDeleter: StubArchiveDeleter(succeed: true)
+    )
+    _ = succeeding.delete(id: "ok")
+    XCTAssertNil(succeeding.lastActionError)
+  }
+
+  func testFailedCompactSurfacesDaemonErrorMessage() {
+    let model = MenuBarModel(
+      pinger: StubPinger(isUp: true),
+      archiveCompactor: StubArchiveCompactor(
+        result: CompactResult(ok: false, errorMessage: "archive is busy")
+      )
+    )
+
+    XCTAssertFalse(model.compact(id: "x").ok)
+    XCTAssertEqual(model.lastActionError, "archive is busy")
+  }
+
+  func testRefreshDoesNotClearLastActionError() {
+    let model = MenuBarModel(
+      pinger: StubPinger(isUp: true),
+      archiveDeleter: StubArchiveDeleter(succeed: false)
+    )
+    _ = model.delete(id: "gone")
+    XCTAssertNotNil(model.lastActionError)
+
+    model.refresh()
+    XCTAssertNotNil(model.lastActionError, "the 2s poll must not wipe the failure before the user reads it")
+
+    model.clearActionError()
+    XCTAssertNil(model.lastActionError)
+  }
+
+  private static func statusInfo(chatDBReadable: Bool?) -> DaemonStatusInfo {
+    DaemonStatusInfo(
+      state: "watching",
+      version: "0.5.0",
+      startedAt: "2026-04-30T12:00:00Z",
+      uptimeSeconds: 60,
+      lastWalChangeAt: nil,
+      lastWalSize: 0,
+      recoveryCount: 0,
+      lastError: nil,
+      dataDir: "/Users/example/Library/Application Support/imessage-unsent",
+      notificationsShow: true,
+      chatDBReadable: chatDBReadable
+    )
+  }
 }
 
 private struct StubPinger: DaemonPinging {
@@ -179,5 +289,13 @@ private final class StubArchiveDeleter: ArchiveDeleting {
   func deleteArchive(id: String) -> Bool {
     deletedIds.append(id)
     return succeed
+  }
+}
+
+private struct StubArchiveCompactor: ArchiveCompacting {
+  let result: CompactResult
+
+  func compactArchive(id _: String) -> CompactResult {
+    result
   }
 }

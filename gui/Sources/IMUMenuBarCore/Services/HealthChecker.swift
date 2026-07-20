@@ -928,8 +928,8 @@ public final class DefaultHealthChecker: HealthChecking {
         severity: .warn,
         title: "Notifications",
         summary: "Permission has not been requested yet",
-        detail: "Until the daemon requests notification permission, recovery alerts are silently dropped.",
-        remediation: "Trigger a test notification from the daemon, or open System Settings → Notifications and enable `imessage-unsent` manually.",
+        detail: "Until notification permission is granted, recovery alerts are silently dropped. The menu bar app owns notification delivery — the daemon never posts them.",
+        remediation: "Open Settings → Notifications, click \"Enable notifications\", then \"Send test\" — or allow `iMessage Unsent` under System Settings → Notifications.",
         remediationURL: settingsURL
       )
     case .denied:

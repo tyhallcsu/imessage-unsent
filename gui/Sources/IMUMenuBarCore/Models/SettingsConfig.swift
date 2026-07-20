@@ -42,6 +42,15 @@ public struct SettingsNotifications: Equatable {
     self.webhook = webhook
     self.webhookSigningSecret = webhookSigningSecret
   }
+
+  /// True when the webhook URL would carry recovered message text over
+  /// cleartext HTTP. The Settings pane warns on this; it is a warning, not a
+  /// hard block, because localhost/dev endpoints are legitimate.
+  public static func isInsecureWebhookURL(_ raw: String) -> Bool {
+    raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+      .hasPrefix("http://")
+  }
 }
 
 public struct SettingsExperimental: Equatable {

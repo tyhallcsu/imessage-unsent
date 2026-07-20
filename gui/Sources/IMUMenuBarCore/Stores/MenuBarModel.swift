@@ -48,6 +48,11 @@ public final class MenuBarModel: ObservableObject {
   @Published public private(set) var recentEntries: [ArchiveHistoryEntryDTO] = []
   @Published public var searchText: String = ""
 
+  /// Most recent archive delete/compact failure, kept until the next
+  /// successful action or an explicit `clearActionError()`. The 2 s refresh
+  /// timer must NOT clear it — the user needs time to read the failure.
+  @Published public private(set) var lastActionError: String?
+
   public let contactsResolver: ContactsResolving
 
   private let pinger: DaemonPinging
@@ -131,11 +136,28 @@ public final class MenuBarModel: ObservableObject {
     }
   }
 
+  /// True when the daemon's own open(2) probe reports chat.db is unreadable —
+  /// the Full Disk Access grant was lost (typical after a rebuild changes the
+  /// binary's code identity). nil/absent probe data is NOT treated as denied.
+  public var fullDiskAccessDenied: Bool {
+    statusInfo?.chatDBReadable == false
+  }
+
+  /// True when the primary surfaces (menu bar icon, dropdown) should show an
+  /// attention marker: recovery is silently broken while the app looks alive.
+  public var needsAttention: Bool {
+    status == .down || fullDiskAccessDenied
+  }
+
   /// Removes the archive via the daemon and refreshes local state on success.
   /// Returns whether the daemon reported success.
   @discardableResult
   public func delete(id: String) -> Bool {
-    guard archiveDeleter.deleteArchive(id: id) else { return false }
+    guard archiveDeleter.deleteArchive(id: id) else {
+      lastActionError = "Delete failed — the daemon refused or the archive is already gone."
+      return false
+    }
+    lastActionError = nil
     refresh()
     return true
   }
@@ -146,9 +168,16 @@ public final class MenuBarModel: ObservableObject {
   public func compact(id: String) -> CompactResult {
     let result = archiveCompactor.compactArchive(id: id)
     if result.ok {
+      lastActionError = nil
       refresh()
+    } else {
+      lastActionError = result.errorMessage ?? "Compact failed."
     }
     return result
+  }
+
+  public func clearActionError() {
+    lastActionError = nil
   }
 
   private func mapState(_ raw: String) -> DaemonStatus {

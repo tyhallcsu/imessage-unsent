@@ -92,3 +92,16 @@ private final class StubStore: ConfigFileStoring {
     initial = config
   }
 }
+
+final class SettingsNotificationsValidationTests: XCTestCase {
+  func testPlainHTTPWebhookIsFlaggedInsecure() {
+    XCTAssertTrue(SettingsNotifications.isInsecureWebhookURL("http://example.com/hook"))
+    XCTAssertTrue(SettingsNotifications.isInsecureWebhookURL("  HTTP://example.com/hook  "))
+  }
+
+  func testHTTPSAndEmptyWebhooksAreNotFlagged() {
+    XCTAssertFalse(SettingsNotifications.isInsecureWebhookURL("https://example.com/hook"))
+    XCTAssertFalse(SettingsNotifications.isInsecureWebhookURL(""))
+    XCTAssertFalse(SettingsNotifications.isInsecureWebhookURL("   "))
+  }
+}

@@ -13,6 +13,10 @@ struct RecoveryDetailView: View {
 
   @State private var showingDeleteConfirmation = false
   @State private var showingCompactConfirmation = false
+  /// The `entry` param is an immutable snapshot; without this, a successful
+  /// Compact leaves the chip missing, the Compact button enabled, and the
+  /// iPhone-backup retry pointed at snapshots that no longer exist.
+  @State private var didCompact = false
   @State private var copyConfirmation: String?
   @State private var compactStatus: String?
 
@@ -62,6 +66,7 @@ struct RecoveryDetailView: View {
       Button("Compact", role: .destructive) {
         let result = model.compact(id: entry.id)
         if result.ok {
+          didCompact = true
           let mb = Double(result.bytesReclaimed) / 1_000_000
           compactStatus = String(format: "Compacted — reclaimed %.1f MB", mb)
         } else {
@@ -77,6 +82,10 @@ struct RecoveryDetailView: View {
     }
   }
 
+  private var isCompacted: Bool {
+    entry.isCompacted || didCompact
+  }
+
   private var header: some View {
     HStack(alignment: .firstTextBaseline) {
       VStack(alignment: .leading, spacing: 2) {
@@ -84,13 +93,13 @@ struct RecoveryDetailView: View {
           Text(model.contactsResolver.displayName(forHandle: entry.handle) ?? entry.handle)
             .font(.title3)
             .fontWeight(.semibold)
-          if entry.isCompacted {
+          if isCompacted {
             Text("Compacted")
               .font(.caption2)
               .foregroundStyle(.secondary)
               .padding(.horizontal, 6)
               .padding(.vertical, 2)
-              .background(RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(0.18)))
+              .background(RoundedRectangle(cornerRadius: 4).fill(.quaternary))
               .help("Snapshot files dropped to reclaim disk space; recovered text retained.")
           }
         }
@@ -106,7 +115,9 @@ struct RecoveryDetailView: View {
           .foregroundStyle(.secondary)
       }
       .buttonStyle(.plain)
+      .keyboardShortcut(.cancelAction)
       .help("Close")
+      .accessibilityLabel("Close")
     }
     .padding(.horizontal, 20)
     .padding(.vertical, 14)
@@ -123,7 +134,7 @@ struct RecoveryDetailView: View {
           .textSelection(.enabled)
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(12)
-          .background(RoundedRectangle(cornerRadius: 6).fill(Color.gray.opacity(0.1)))
+          .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
       }
     } else {
       VStack(alignment: .leading, spacing: 6) {
@@ -147,8 +158,8 @@ struct RecoveryDetailView: View {
               } label: {
                 Label("Try iPhone backup", systemImage: "iphone")
               }
-              .disabled(retryModel.isRunning || entry.isCompacted)
-              .help(entry.isCompacted
+              .disabled(retryModel.isRunning || isCompacted)
+              .help(isCompacted
                     ? "Retry unavailable after compaction"
                     : "Re-run recover.sh against iPhone backups only.")
             }
@@ -205,7 +216,7 @@ struct RecoveryDetailView: View {
         }
       }
       .padding(12)
-      .background(RoundedRectangle(cornerRadius: 6).fill(Color.gray.opacity(0.06)))
+      .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
     }
   }
 
@@ -232,6 +243,13 @@ struct RecoveryDetailView: View {
         Label(status, systemImage: "archivebox")
           .foregroundStyle(.secondary)
           .font(.caption)
+      } else if let actionError = model.lastActionError {
+        // A failed delete/compact must not be silent — the button otherwise
+        // appears to do nothing (the sheet only dismisses on success).
+        Label(actionError, systemImage: "exclamationmark.triangle.fill")
+          .foregroundStyle(.orange)
+          .font(.caption)
+          .lineLimit(2)
       } else if let statusText = retryModel.statusMessage,
                 let statusImage = retryModel.statusSystemImage {
         retryStatusChip(text: statusText, systemImage: statusImage)
@@ -253,8 +271,8 @@ struct RecoveryDetailView: View {
       } label: {
         Label("Compact", systemImage: "archivebox")
       }
-      .disabled(entry.isCompacted)
-      .help(entry.isCompacted ? "Already compacted" : "Drop snapshot files; keep recovered text + manifest.")
+      .disabled(isCompacted)
+      .help(isCompacted ? "Already compacted" : "Drop snapshot files; keep recovered text + manifest.")
       Button(role: .destructive) {
         showingDeleteConfirmation = true
       } label: {
@@ -303,6 +321,6 @@ struct RecoveryDetailView: View {
       .foregroundStyle(.secondary)
       .padding(.horizontal, 8)
       .padding(.vertical, 4)
-      .background(RoundedRectangle(cornerRadius: 6).fill(Color.gray.opacity(0.12)))
+      .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
   }
 }

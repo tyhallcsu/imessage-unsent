@@ -24,6 +24,11 @@ struct SettingsWindow: View {
     .onAppear {
       model.refresh()
       contactsModel.refresh()
+      // Pick up hand-edits to config.toml (the file header invites them),
+      // but never discard the user's own unsaved changes.
+      if !settingsModel.isDirty {
+        settingsModel.reload()
+      }
     }
     .task {
       await permissionModel.refresh()
@@ -70,6 +75,15 @@ struct SettingsWindow: View {
       Text("Full Disk Access")
         .frame(width: 180, alignment: .leading)
 
+      if model.status == .down {
+        // No probe is running when the daemon is unreachable — saying
+        // "Probing…" here sent users chasing a permission that wasn't
+        // the problem (fresh installs have no daemon at all).
+        Label("Daemon not running — start imu-watcher to verify", systemImage: "info.circle")
+          .foregroundStyle(.secondary)
+          .font(.callout)
+          .lineLimit(2)
+      } else {
       switch model.statusInfo?.chatDBReadable {
       case .some(true):
         Label("Granted — daemon can read chat.db", systemImage: "checkmark.circle.fill")
@@ -85,6 +99,7 @@ struct SettingsWindow: View {
         Label("Probing…", systemImage: "hourglass")
           .foregroundStyle(.secondary)
           .font(.callout)
+      }
       }
 
       Spacer()
@@ -103,7 +118,7 @@ struct SettingsWindow: View {
       }
       .help("Opens Finder at the imu-watcher binary so you can drag it into the Full Disk Access list.")
 
-      if model.statusInfo?.chatDBReadable != true {
+      if model.status != .down && model.statusInfo?.chatDBReadable != true {
         Button("Open Full Disk Access…") {
           openFullDiskAccessSettings()
         }
@@ -199,6 +214,8 @@ struct SettingsWindow: View {
           step: 10
         )
         .disabled(!settingsModel.draft.notifications.show)
+        .accessibilityLabel("Notification preview length")
+        .accessibilityValue("\(settingsModel.draft.notifications.previewChars) characters")
       }
 
       VStack(alignment: .leading, spacing: 4) {
@@ -210,6 +227,14 @@ struct SettingsWindow: View {
         )
         .textFieldStyle(.roundedBorder)
         .disableAutocorrection(true)
+        if SettingsNotifications.isInsecureWebhookURL(settingsModel.draft.notifications.webhook) {
+          Label(
+            "Plain HTTP — recovered message text would leave this Mac unencrypted. Use https://.",
+            systemImage: "exclamationmark.triangle.fill"
+          )
+          .font(.caption)
+          .foregroundStyle(.orange)
+        }
       }
 
       VStack(alignment: .leading, spacing: 4) {
@@ -220,6 +245,9 @@ struct SettingsWindow: View {
           text: $settingsModel.draft.notifications.webhookSigningSecret
         )
         .textFieldStyle(.roundedBorder)
+        Text("Stored in plaintext in config.toml (owner-only file permissions).")
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
     }
   }

@@ -44,6 +44,7 @@ struct HistoryWindow: View {
     .sheet(item: $selectedEntry, onDismiss: {
       loadedDetail = nil
       loadError = nil
+      model.clearActionError()
     }) { entry in
       RecoveryDetailView(
         model: model,
@@ -126,6 +127,7 @@ struct HistoryWindow: View {
       Text(value).font(.callout).fontWeight(.semibold).monospacedDigit()
       Text(label).font(.caption2).foregroundStyle(.secondary)
     }
+    .accessibilityElement(children: .combine)
   }
 
   @ViewBuilder
@@ -135,16 +137,20 @@ struct HistoryWindow: View {
       emptyState
     } else {
       List(entries, id: \.id) { entry in
-        RecoveryRowView(
-          entry: entry,
-          displayName: model.contactsResolver.displayName(forHandle: entry.handle),
-          avatarImageData: model.contactsResolver.avatarImageData(forHandle: entry.handle),
-          archiveStats: archiveStats.provider.stats(forArchiveId: entry.id)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
+        // Button (not onTapGesture) so rows are keyboard-activatable and
+        // VoiceOver exposes them as actionable elements.
+        Button {
           openDetail(for: entry)
+        } label: {
+          RecoveryRowView(
+            entry: entry,
+            displayName: model.contactsResolver.displayName(forHandle: entry.handle),
+            avatarImageData: model.contactsResolver.avatarImageData(forHandle: entry.handle),
+            archiveStats: archiveStats.provider.stats(forArchiveId: entry.id)
+          )
+          .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
       }
       .listStyle(.inset)
     }
@@ -192,6 +198,12 @@ struct HistoryWindow: View {
         Text("Start imu-watcher to begin watching chat.db.")
           .font(.caption)
           .foregroundStyle(.tertiary)
+        Button("Run Health Check…") {
+          if let url = URL(string: "imu://doctor") {
+            NSWorkspace.shared.open(url)
+          }
+        }
+        .padding(.top, 4)
       } else if model.recentEntries.isEmpty {
         Text("Once someone unsends a message you'll see it here.")
           .font(.caption)

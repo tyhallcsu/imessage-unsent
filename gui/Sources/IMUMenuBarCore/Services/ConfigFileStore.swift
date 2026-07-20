@@ -37,6 +37,9 @@ public final class ConfigFileStore: ConfigFileStoring {
     )
     let text = Self.serialize(config)
     try text.write(to: configURL, atomically: true, encoding: .utf8)
+    // The file carries the webhook signing secret in plaintext; owner-only,
+    // and re-applied on every save because atomic writes replace the inode.
+    try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
   }
 
   /// Public for tests; mirrors the daemon's `ConfigStore.parse` shape.
