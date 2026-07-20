@@ -11,6 +11,13 @@ final class ControlServerTests: XCTestCase {
   private var archivesDir: URL!
 
   override func setUpWithError() throws {
+    // The ControlServer runs IN-PROCESS here, and it legitimately send(2)s a
+    // response onto client sockets that a test may have already closed (the
+    // #141 abrupt-disconnect and refuse-to-steal scenarios). The real daemon
+    // survives that because main.swift sets signal(SIGPIPE, SIG_IGN) process
+    // wide; mirror that disposition so an in-process EPIPE cannot SIGPIPE-kill
+    // the whole test runner. Per-fd SO_NOSIGPIPE alone did not cover this.
+    signal(SIGPIPE, SIG_IGN)
     // sockaddr_un.sun_path on Darwin is 104 bytes, so we stay shallow under
     // /private/tmp (the actual location /tmp symlinks to) to match what
     // FileManager-derived paths will report later.
@@ -308,5 +315,173 @@ final class ControlServerTests: XCTestCase {
     ]
     try JSONSerialization.data(withJSONObject: recovery, options: [.prettyPrinted])
       .write(to: archive.appendingPathComponent("recovery.json", isDirectory: false))
+  }
+}
+
+// MARK: - Socket robustness (#141)
+
+extension ControlServerTests {
+  /// Clients that slam the connection shut without reading force send(2)
+  /// onto a dead socket. The daemon process ignores SIGPIPE (main.swift) and
+  /// the server additionally sets SO_NOSIGPIPE per accepted fd; this test
+  /// mirrors the daemon's process disposition and then proves the server
+  /// keeps serving through 50 abrupt disconnects.
+  func testAbruptClientDisconnectsDoNotKillTheServer() throws {
+    for _ in 0..<50 {
+      // Refused connections are the server load-shedding a full backlog —
+      // part of the abuse pattern, not a failure. Skip and keep hammering.
+      guard let fd = rawConnectQuietly() else {
+        Thread.sleep(forTimeInterval: 0.01)
+        continue
+      }
+      let payload = Data("{\"op\":\"status\"}\n".utf8)
+      payload.withUnsafeBytes { rawBuffer in
+        _ = Darwin.send(fd, rawBuffer.baseAddress, payload.count, 0)
+      }
+      Darwin.close(fd)
+    }
+
+    // The server sheds over-capacity connections instantly (4 worker slots),
+    // so a ping racing the drain can be legitimately dropped. Retry with an
+    // assertion-free probe (roundTrip's XCTUnwrap would record a failure on
+    // the first shed attempt even when a retry then succeeds): the guarantee
+    // under test is "still serving after abuse", not "never sheds load".
+    var answered = false
+    for _ in 0..<40 where !answered {
+      answered = pingQuietly()
+      if !answered {
+        Thread.sleep(forTimeInterval: 0.05)
+      }
+    }
+    XCTAssertTrue(answered, "server stopped answering after abrupt disconnects")
+  }
+
+  func testStartRefusesToStealALiveSocket() throws {
+    let second = ControlServer(
+      socketPath: socketPath,
+      statusBoard: statusBoard,
+      historyReader: ArchiveHistoryReader(archivesDir: archivesDir),
+      version: "test-0.2",
+      dataDir: workDir,
+      notificationsShow: true
+    )
+
+    XCTAssertThrowsError(try second.start()) { error in
+      guard case ControlServerError.socketInUse = error else {
+        return XCTFail("expected socketInUse, got \(error)")
+      }
+    }
+
+    // The original server keeps its socket and keeps answering.
+    XCTAssertTrue(FileManager.default.fileExists(atPath: socketPath.path))
+    let response = try roundTrip(#"{"op":"ping"}"#)
+    XCTAssertEqual(response["ok"] as? Bool, true)
+  }
+
+  func testStartReclaimsAStaleSocketFile() throws {
+    server.stop()
+    XCTAssertFalse(FileManager.default.fileExists(atPath: socketPath.path))
+
+    // Plant a stale socket file: bind, then close WITHOUT unlink — exactly
+    // what a crashed daemon leaves behind.
+    let stale = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+    XCTAssertGreaterThanOrEqual(stale, 0)
+    var addr = makeSockaddr(for: socketPath.path)
+    let bindResult = withUnsafePointer(to: &addr) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+        Darwin.bind(stale, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_un>.size))
+      }
+    }
+    XCTAssertEqual(bindResult, 0)
+    Darwin.close(stale)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: socketPath.path))
+
+    try server.start()
+    let response = try roundTrip(#"{"op":"ping"}"#)
+    XCTAssertEqual(response["ok"] as? Bool, true)
+  }
+
+  func testStopLeavesAForeignSocketFileAlone() throws {
+    // Simulate a hijack: the path now points at someone else's file.
+    try FileManager.default.removeItem(at: socketPath)
+    FileManager.default.createFile(atPath: socketPath.path, contents: Data())
+
+    server.stop()
+
+    XCTAssertTrue(
+      FileManager.default.fileExists(atPath: socketPath.path),
+      "stop() must not unlink a socket path it no longer owns"
+    )
+  }
+
+  // MARK: helpers
+
+  /// Assertion-free connect: nil when the socket can't be created or the
+  /// server refuses (full backlog under load — expected during the abuse
+  /// loop). SO_NOSIGPIPE keeps the TEST process alive when its own send()
+  /// hits a connection the server already RST'd.
+  private func rawConnectQuietly() -> Int32? {
+    let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+    guard fd >= 0 else {
+      return nil
+    }
+    var noSigPipe: Int32 = 1
+    _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+    var addr = makeSockaddr(for: socketPath.path)
+    let connectResult = withUnsafePointer(to: &addr) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+        Darwin.connect(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_un>.size))
+      }
+    }
+    guard connectResult == 0 else {
+      Darwin.close(fd)
+      return nil
+    }
+    return fd
+  }
+
+  /// Assertion-free ping probe — returns false on any shed/failed attempt
+  /// instead of recording an XCTest failure, so callers can retry.
+  private func pingQuietly() -> Bool {
+    guard let fd = rawConnectQuietly() else {
+      return false
+    }
+    defer { Darwin.close(fd) }
+    var tv = timeval(tv_sec: 1, tv_usec: 0)
+    _ = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+    let payload = Data("{\"op\":\"ping\"}\n".utf8)
+    let sent = payload.withUnsafeBytes { rawBuffer in
+      Darwin.send(fd, rawBuffer.baseAddress, payload.count, 0)
+    }
+    guard sent == payload.count else {
+      return false
+    }
+    _ = Darwin.shutdown(fd, SHUT_WR)
+    var buffer = Data()
+    var byte: UInt8 = 0
+    while buffer.count < 65_536 {
+      let n = Darwin.recv(fd, &byte, 1, 0)
+      if n <= 0 { break }
+      if byte == 0x0A { break }
+      buffer.append(byte)
+    }
+    guard let parsed = (try? JSONSerialization.jsonObject(with: buffer)) as? [String: Any] else {
+      return false
+    }
+    return parsed["ok"] as? Bool == true
+  }
+
+  private func makeSockaddr(for path: String) -> sockaddr_un {
+    var addr = sockaddr_un()
+    addr.sun_family = sa_family_t(AF_UNIX)
+    let pathBytes = Array(path.utf8CString)
+    precondition(pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path))
+    withUnsafeMutableBytes(of: &addr.sun_path) { rawBuffer in
+      let buffer = rawBuffer.bindMemory(to: CChar.self)
+      for index in pathBytes.indices {
+        buffer[index] = pathBytes[index]
+      }
+    }
+    return addr
   }
 }

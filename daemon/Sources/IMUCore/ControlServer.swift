@@ -8,6 +8,7 @@ public enum ControlServerError: Error, LocalizedError {
   case bindFailed(String)
   case listenFailed(String)
   case alreadyStarted
+  case socketInUse(String)
 
   public var errorDescription: String? {
     switch self {
@@ -21,6 +22,8 @@ public enum ControlServerError: Error, LocalizedError {
       return "failed to listen on control socket: \(message)"
     case .alreadyStarted:
       return "control server already started"
+    case let .socketInUse(path):
+      return "another control server is already listening at \(path) — refusing to steal its socket"
     }
   }
 }
@@ -44,6 +47,11 @@ public final class ControlServer {
   // closed, so stop() can block until teardown is truly complete.
   private var acceptCancelSemaphore: DispatchSemaphore?
   private var started = false
+  // Inode of the socket file THIS server bound. stop() only unlinks the path
+  // while it still points at our inode — another process may have replaced
+  // the file, and deleting theirs takes a healthy server offline (#141).
+  // Guarded by lifecycleQueue like the rest of the lifecycle state.
+  private var boundInode: ino_t?
 
   public init(
     socketPath: URL,
@@ -93,8 +101,17 @@ public final class ControlServer {
         throw ControlServerError.socketCreationFailed(Self.errnoString())
       }
 
-      // Best-effort cleanup of stale socket file.
-      _ = Darwin.unlink(path)
+      // Reclaim the path ONLY when no listener answers. Unconditional unlink
+      // let a second daemon instance silently steal the socket out from under
+      // the healthy LaunchAgent (#141): the old server kept serving an
+      // orphaned inode while every new client reached the newcomer.
+      if FileManager.default.fileExists(atPath: path) {
+        if Self.socketHasListener(path: path, pathBytes: pathBytes) {
+          Darwin.close(fd)
+          throw ControlServerError.socketInUse(path)
+        }
+        _ = Darwin.unlink(path)
+      }
 
       addr.sun_family = sa_family_t(AF_UNIX)
       withUnsafeMutableBytes(of: &addr.sun_path) { rawBuffer in
@@ -116,6 +133,9 @@ public final class ControlServer {
       }
 
       _ = Darwin.chmod(path, 0o600)
+
+      var boundStat = stat()
+      boundInode = lstat(path, &boundStat) == 0 ? boundStat.st_ino : nil
 
       guard Darwin.listen(fd, 4) == 0 else {
         let message = Self.errnoString()
@@ -163,7 +183,13 @@ public final class ControlServer {
       let cancelSemaphore = acceptCancelSemaphore
       acceptSource = nil
       acceptCancelSemaphore = nil
-      _ = Darwin.unlink(socketPath.path)
+      var currentStat = stat()
+      if let boundInode,
+         lstat(socketPath.path, &currentStat) == 0,
+         currentStat.st_ino == boundInode {
+        _ = Darwin.unlink(socketPath.path)
+      }
+      boundInode = nil
       // Cancel the accept source and wait (bounded) for its cancel handler to
       // close the listen fd. This makes teardown deterministic and guarantees
       // libdispatch is finished with the fd before it can be reused (#124).
@@ -189,6 +215,12 @@ public final class ControlServer {
       // governs read timeouts instead of recv() returning EAGAIN immediately.
       let clientFlags = fcntl(clientFD, F_GETFL, 0)
       _ = fcntl(clientFD, F_SETFL, clientFlags & ~O_NONBLOCK)
+
+      // A client that disconnects between request and response (GUI force
+      // quit, Ctrl-C'd nc) must yield EPIPE from send(2), not a SIGPIPE that
+      // kills the whole daemon (#141).
+      var noSigPipe: Int32 = 1
+      _ = setsockopt(clientFD, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
 
       if clientSemaphore.wait(timeout: .now()) == .timedOut {
         Darwin.close(clientFD)
@@ -408,6 +440,31 @@ public final class ControlServer {
 
   private static func errnoString() -> String {
     String(cString: strerror(errno))
+  }
+
+  /// True when a live server is accepting on `path`. connect(2) on a Unix
+  /// socket resolves locally and immediately: success means a listener owns
+  /// the file; ECONNREFUSED/ENOENT mean the file is stale and safe to unlink.
+  private static func socketHasListener(path: String, pathBytes: [CChar]) -> Bool {
+    let probeFD = socket(AF_UNIX, SOCK_STREAM, 0)
+    guard probeFD >= 0 else {
+      return false
+    }
+    defer { Darwin.close(probeFD) }
+    var addr = sockaddr_un()
+    addr.sun_family = sa_family_t(AF_UNIX)
+    withUnsafeMutableBytes(of: &addr.sun_path) { rawBuffer in
+      let buffer = rawBuffer.bindMemory(to: CChar.self)
+      for index in pathBytes.indices {
+        buffer[index] = pathBytes[index]
+      }
+    }
+    let result = withUnsafePointer(to: &addr) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+        Darwin.connect(probeFD, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_un>.size))
+      }
+    }
+    return result == 0
   }
 
   private static let isoFormatter: ISO8601DateFormatter = {
