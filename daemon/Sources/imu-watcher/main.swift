@@ -186,7 +186,11 @@ final class WatcherDaemon {
 
     do {
       let events = try detector.detect()
-      var processedEvents: [RetractionDetected] = []
+      // Every event the loop touched — including ones whose archive() threw —
+      // must reach markProcessed: it caps the high-water below events that
+      // still have retry attempts left, so omitting a failed event here
+      // would let a newer success starve its retries forever (#142).
+      var handledEvents: [RetractionDetected] = []
       for event in events {
         log(
           "retraction detected rowid=\(event.rowid) guid=\(event.guid) " +
@@ -220,14 +224,15 @@ final class WatcherDaemon {
           }
           notifier?.notify(complete)
           statusBoard.recordRecovery()
-          processedEvents.append(event)
+          handledEvents.append(event)
         } catch {
           log("archive error rowid=\(event.rowid) error=\(error.localizedDescription)")
           try? detector.markFailed(guid: event.guid)
           statusBoard.recordError(error.localizedDescription)
+          handledEvents.append(event)
         }
       }
-      try detector.markProcessed(processedEvents)
+      try detector.markProcessed(handledEvents)
     } catch {
       log("detector error=\(error.localizedDescription)")
       statusBoard.recordError(error.localizedDescription)
