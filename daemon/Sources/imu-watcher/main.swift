@@ -28,6 +28,13 @@ final class WatcherDaemon {
   private var controlServer: ControlServer?
   private var lastWalSize: Int64 = 0
   private var stopped = false
+  // Detection + archiving run here, NOT on the FSWatcher queue (#143): a
+  // recover.sh run can take up to ~2 minutes, and while it occupied the
+  // watcher queue neither FSEvents nor the poll timer could fire, so no WAL
+  // snapshots were taken — a second retraction in that window could be
+  // checkpointed away unsnapshotted, exactly the loss the #67 buffer exists
+  // to prevent. Serial, so RetractionDetector state stays single-threaded.
+  private let pipelineQueue = DispatchQueue(label: "com.imu.watcher.pipeline")
   // Held (never closed) for the process lifetime — the flock IS the
   // single-instance guard.
   private var instanceLockFD: Int32 = -1
@@ -123,6 +130,9 @@ final class WatcherDaemon {
     timer.setEventHandler { [weak self] in
       self?.log("heartbeat status=idle")
       self?.probeChatDBAccess()
+      // Age out stale WAL snapshots during quiet periods too — snapshot()
+      // only trims on write activity (#143).
+      self?.walSnapshotter?.trimExpired()
     }
     timer.resume()
     heartbeatTimer = timer
@@ -180,10 +190,30 @@ final class WatcherDaemon {
     log("wal change size=\(size) delta=\(deltaText)")
     statusBoard.recordWalChange(size: size)
 
-    guard let detector else {
+    guard let detector, let archivePipeline else {
       return
     }
 
+    // Capture the refs HERE (watcher queue) so the pipeline never reads
+    // self's mutable properties from another queue.
+    let walSnapshotter = self.walSnapshotter
+    let notifier = self.notifier
+    pipelineQueue.async { [weak self] in
+      self?.runDetectionPipeline(
+        detector: detector,
+        archivePipeline: archivePipeline,
+        walSnapshotter: walSnapshotter,
+        notifier: notifier
+      )
+    }
+  }
+
+  private func runDetectionPipeline(
+    detector: RetractionDetector,
+    archivePipeline: ArchivePipeline,
+    walSnapshotter: WALSnapshotter?,
+    notifier: RecoveryNotifier?
+  ) {
     do {
       let events = try detector.detect()
       // Every event the loop touched — including ones whose archive() threw —
@@ -197,9 +227,6 @@ final class WatcherDaemon {
             "handle=\(event.handle) edited_at=\(event.editedAt)"
         )
         do {
-          guard let archivePipeline else {
-            continue
-          }
           let complete = try archivePipeline.archive(event: event)
           // Copy the rolling WAL buffer into the archive's wal-history/ so
           // the recovery script can scan older WAL frames too (#67).

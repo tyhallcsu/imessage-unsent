@@ -80,9 +80,15 @@ public final class WALSnapshotter {
     }
   }
 
-  /// Copies every snapshot currently in the rolling buffer into a fresh
+  /// Copies the snapshots still inside the `maxAge` window into a fresh
   /// `wal-history/` directory under `destDir`. Used by `ArchivePipeline` to
   /// preserve the buffer state alongside each archived retraction.
+  ///
+  /// Age-filtered (#143 / F-M5): `trim` only runs on write activity, so after
+  /// a quiet stretch the buffer can hold hours-stale snapshots — copying
+  /// those into every archive multiplied disk use (retention × WAL size per
+  /// archive) with zero forensic value; the pre-retract page is only ever in
+  /// a snapshot younger than the unsend window.
   public func archiveTo(_ destDir: URL) throws {
     try queue.sync {
       try fileManager.createDirectory(
@@ -90,13 +96,30 @@ public final class WALSnapshotter {
         withIntermediateDirectories: true,
         attributes: [.posixPermissions: 0o700]
       )
+      let cutoff = clock().addingTimeInterval(-maxAge)
       for snap in try listSnapshots() {
+        guard
+          let attrs = try? fileManager.attributesOfItem(atPath: snap.path),
+          let mtime = attrs[.modificationDate] as? Date,
+          mtime >= cutoff
+        else {
+          continue
+        }
         let dest = destDir.appendingPathComponent(snap.lastPathComponent, isDirectory: false)
         if fileManager.fileExists(atPath: dest.path) {
           try fileManager.removeItem(at: dest)
         }
         try fileManager.copyItem(at: snap, to: dest)
       }
+    }
+  }
+
+  /// Age-based retention pass for quiet periods. `snapshot()` trims only on
+  /// write activity, so without a periodic call stale snapshots would sit in
+  /// the buffer indefinitely (#143). Called from the daemon heartbeat.
+  public func trimExpired() {
+    queue.sync {
+      try? trim(now: clock())
     }
   }
 
