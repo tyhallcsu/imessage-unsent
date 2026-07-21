@@ -25,7 +25,7 @@ flowchart LR
 
     subgraph Storage["~/Library/Application Support/imessage-unsent/"]
         Archives[("archives/<br/>YYYY-MM-DDTHHMMSSZ-rowid/<br/>├── manifest.json<br/>├── recovery.json<br/>└── chat.db* snapshot")]
-        Sock[("daemon.sock<br/>(read-only control socket)")]
+        Sock[("daemon.sock<br/>(control socket: status read-only;<br/>archive delete/compact)")]
         Cfg[("~/.config/imessage-unsent/<br/>config.toml")]
     end
 
@@ -40,7 +40,7 @@ flowchart LR
 
     Daemon -->|writes| Archives
     Daemon -->|exposes| Sock
-    Daemon -->|posts| Notify
+    GUI -->|posts| Notify
     Daemon -->|HMAC-signed POST| Webhook
     Daemon -->|reads| Cfg
 
@@ -79,7 +79,7 @@ flowchart TD
     K -- non-zero --> M[Write recovery.json<br/>with error string]
     L --> N[Update manifest.json:<br/>recovery.recovered=true]
     M --> O[Update manifest.json:<br/>recovery.recovered=false]
-    N --> P[RecoveryNotifier.swift<br/>UNUserNotificationCenter banner]
+    N --> P[GUI RecoveryWatcher<br/>UNUserNotificationCenter banner<br/>daemon never posts natively]
     O --> P
     P --> Q[RecoveryNotifier.swift<br/>HMAC-signed webhook POST<br/>retried 3x with backoff]
     Q --> R[ControlServer recent op<br/>now returns this entry to GUI]
@@ -136,7 +136,7 @@ sequenceDiagram
     AP->>AP: write recovery.json + update manifest.json
     AP->>N: notifyRecovery(handle, text)
     par Notification + Webhook
-        N->>N: UNUserNotificationCenter banner (T+30.6s)
+        N->>N: GUI RecoveryWatcher posts the banner (≤5s poll; daemon never posts)
     and
         N->>N: HMAC-signed POST to webhook (if configured)
     end
@@ -149,7 +149,7 @@ sequenceDiagram
 
 What this tells you to watch for:
 - **The WAL is racing checkpoint.** Every second between T+30.0s and the snapshot at T+30.05s is a second SQLite has to checkpoint the WAL and erase the original text. This is why [`FSWatcher`](../daemon/Sources/IMUCore/FSWatcher.swift) is primarily push-driven (FSEvents) **with a mandatory 1 Hz polling fallback** (issue #59 / PR #60) — FSEvents drops many `chat.db-wal` writes under `~/Library/Messages`, so the poll timer catches what it misses. Do not remove the poll fallback. The [`testWatcherToDetectorLatencyIsUnderFiveHundredMilliseconds`](../daemon/Tests/IMUCoreTests/RetractionDetectorTests.swift) assertion guards the latency budget.
-- **Notifications and webhook fan out in parallel** so a slow webhook never blocks the user-facing banner.
+- **The webhook is daemon-side; native banners are GUI-side** (the daemon is a non-bundled CLI and never touches `UNUserNotificationCenter` — #65/#87/#94). A slow webhook never blocks the banner because different processes own them.
 - **The GUI does not push** — it polls the control socket every 2 s ([`MenuBarModel.swift`](../gui/Sources/IMUMenuBarCore/Stores/MenuBarModel.swift)). Worst-case freshness is ~2 s after the daemon writes the manifest.
 
 ## Where to go next

@@ -101,9 +101,9 @@ To run signing locally, set all four `APPLE_DEVELOPER_ID_*` env vars in your she
 After running `make release VERSION=v0.4.0` with secrets set, verify the artifacts:
 
 ```bash
-# Daemon
-codesign --verify --deep --strict --verbose=2 dist/imu-watcher-v0.4.0-arm64.tar.gz
-# (Or extract first; codesign needs the binary, not the tarball.)
+# Daemon — extract first; codesign verifies the Mach-O, not a tarball
+tar -xzf dist/imu-watcher-v0.4.0-arm64.tar.gz
+codesign --verify --strict --verbose=2 imu-watcher-v0.4.0/imu-watcher
 
 # GUI
 unzip -q dist/iMessage-Unsent-v0.4.0.zip

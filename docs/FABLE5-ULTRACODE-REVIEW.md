@@ -1,5 +1,10 @@
 # FABLE5 ULTRACODE Review — imessage-unsent
 
+> **2026-07-20 update:** the v0.5 cycle re-audited this codebase and closed the
+> remaining Medium findings below (F-M4 → #146, F-M5 → #147, F-M10 partially →
+> ArchiveCompactorTests in #148) plus F-L1/F-L3/F-L5/F-L6/F-L7/F-L8. Current
+> status of every finding lives in [V0.5-AUDIT-REPORT.md](V0.5-AUDIT-REPORT.md).
+
 **Reviewer:** Claude Fable 5 (ULTRACODE multi-agent workflow + direct code reading)
 **Date:** 2026-07-17
 **Commit reviewed:** `main` @ `0cd20c2` (feat: v0.3.0 final polish, PR #103)
