@@ -299,3 +299,97 @@ private struct StubArchiveCompactor: ArchiveCompacting {
     result
   }
 }
+
+// MARK: - Async refresh + compactAll (#149 / G-2)
+
+extension MenuBarModelTests {
+  private func waitForMainActorCondition(
+    timeout: TimeInterval = 5,
+    _ condition: @escaping @MainActor () -> Bool
+  ) async -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+      if condition() { return true }
+      try? await Task.sleep(nanoseconds: 20_000_000)
+    }
+    return condition()
+  }
+
+  func testRefreshInBackgroundAppliesResultsOnTheMainActor() async {
+    let model = MenuBarModel(
+      pinger: StubPinger(isUp: true),
+      historyProvider: StubHistoryProvider(count: 2),
+      entryProvider: StubEntryProvider(handles: ["+15550000001"])
+    )
+
+    model.refreshInBackground()
+
+    let applied = await waitForMainActorCondition {
+      model.status == .watching && model.recentEntries.count == 1
+    }
+    XCTAssertTrue(applied, "background refresh must land status + entries on the main actor")
+    XCTAssertEqual(model.recentRecoveries.count, 2)
+  }
+
+  func testStartBeginsPollingWithoutAnyViewAttached() async {
+    // G-3 regression: bootstrap comes from applicationDidFinishLaunching now,
+    // so start() alone — no SwiftUI view, no .onAppear — must begin fetching.
+    let model = MenuBarModel(
+      pinger: StubPinger(isUp: true),
+      entryProvider: StubEntryProvider(handles: ["+15550000001"])
+    )
+
+    model.start()
+
+    let applied = await waitForMainActorCondition {
+      model.status == .watching && model.recentEntries.count == 1
+    }
+    XCTAssertTrue(applied, "start() must kick an immediate background refresh")
+  }
+
+  func testRefreshInBackgroundReportsDownWhenDaemonUnreachable() async {
+    let model = MenuBarModel(pinger: StubPinger(isUp: false))
+
+    model.refreshInBackground()
+
+    let applied = await waitForMainActorCondition { model.status == .down }
+    XCTAssertTrue(applied)
+  }
+
+  func testCompactAllInBackgroundCountsAndSurfacesFailures() async {
+    let model = MenuBarModel(
+      pinger: StubPinger(isUp: true),
+      archiveCompactor: StubFlakyCompactor(failingIds: ["bad-1"])
+    )
+
+    let result = await model.compactAllInBackground(ids: ["ok-1", "bad-1", "ok-2"])
+
+    XCTAssertEqual(result.ok, 2)
+    XCTAssertEqual(result.failed, 1)
+    XCTAssertEqual(result.bytesReclaimed, 2048)
+    XCTAssertEqual(model.lastActionError, "Compact failed for 1 archive.")
+  }
+
+  func testCompactAllInBackgroundClearsErrorOnFullSuccess() async {
+    let model = MenuBarModel(
+      pinger: StubPinger(isUp: true),
+      archiveCompactor: StubFlakyCompactor(failingIds: [])
+    )
+
+    let result = await model.compactAllInBackground(ids: ["ok-1"])
+
+    XCTAssertEqual(result.failed, 0)
+    XCTAssertNil(model.lastActionError)
+  }
+}
+
+private struct StubFlakyCompactor: ArchiveCompacting {
+  let failingIds: Set<String>
+
+  func compactArchive(id: String) -> CompactResult {
+    if failingIds.contains(id) {
+      return CompactResult(ok: false, errorMessage: "synthetic failure")
+    }
+    return CompactResult(ok: true, bytesReclaimed: 1024)
+  }
+}

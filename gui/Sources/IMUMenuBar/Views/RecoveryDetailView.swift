@@ -310,7 +310,7 @@ struct RecoveryDetailView: View {
       ) {
         currentDetail = reloadedDetail
         currentLoadError = nil
-        model.refresh()
+        model.refreshInBackground()
       }
     }
   }

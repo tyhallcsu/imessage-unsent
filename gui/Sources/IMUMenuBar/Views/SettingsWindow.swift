@@ -22,7 +22,7 @@ struct SettingsWindow: View {
     .formStyle(.grouped)
     .frame(minWidth: 520, minHeight: 540)
     .onAppear {
-      model.refresh()
+      model.refreshInBackground()
       contactsModel.refresh()
       // Pick up hand-edits to config.toml (the file header invites them),
       // but never discard the user's own unsaved changes.
@@ -105,7 +105,7 @@ struct SettingsWindow: View {
       Spacer()
 
       Button {
-        model.refresh()
+        model.refreshInBackground()
       } label: {
         Label("Recheck", systemImage: "arrow.clockwise")
       }
@@ -155,7 +155,7 @@ struct SettingsWindow: View {
       Button {
         Task {
           await restartModel.restart()
-          model.refresh()
+          model.refreshInBackground()
         }
       } label: {
         if restartModel.isRestarting {
