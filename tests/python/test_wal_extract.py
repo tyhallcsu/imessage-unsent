@@ -167,3 +167,49 @@ def test_cli_rejects_nonpositive_window(repo_root, tmp_path):
     )
     assert result.returncode != 0
     assert "--window" in result.stderr
+
+
+def test_distinct_texts_sharing_120_char_prefix_both_survive(repo_root, tmp_path):
+    """F-L8 regression (#150): dedup must key on the FULL text — two page
+    versions of a long message can differ only after char 120."""
+    mod = _load_module(repo_root)
+    prefix = "A" * 120
+    wal = _write(
+        tmp_path,
+        _record(mod, prefix + "tail-one") + _record(mod, prefix + "tail-two"),
+    )
+    results = mod.extract_candidates(wal, GUID)
+    assert sorted(text for _, text in results) == [prefix + "tail-one", prefix + "tail-two"]
+
+
+def test_true_duplicates_still_deduped(repo_root, tmp_path):
+    mod = _load_module(repo_root)
+    wal = _write(tmp_path, _record(mod, "same text") + _record(mod, "same text"))
+    results = mod.extract_candidates(wal, GUID)
+    assert [text for _, text in results] == ["same text"]
+
+
+def test_tsv_output_escapes_newlines_into_one_row(repo_root, tmp_path, capsys, monkeypatch):
+    """F-L6 regression (#150): a newline-bearing message must stay one TSV row."""
+    mod = _load_module(repo_root)
+    wal = _write(tmp_path, _record(mod, "line1\nline2\tend"))
+    monkeypatch.setattr(sys, "argv", ["wal_extract.py", str(wal), GUID])
+    rc = mod.main()
+    assert rc == 0
+    out_lines = [line for line in capsys.readouterr().out.splitlines() if line]
+    assert len(out_lines) == 1
+    offset, length, text = out_lines[0].split("\t")
+    assert int(length) == len("line1\nline2\tend")
+    assert text == "line1\\nline2\\tend"
+
+
+def test_eof_window_hit_warns_instead_of_silent_drop(repo_root, tmp_path, capsys):
+    """R-13 (#150): text running to end-of-file (torn final frame) must be
+    reported on stderr, not silently dropped."""
+    mod = _load_module(repo_root)
+    # No marker, no pad after: the text ends exactly at EOF, inside the window.
+    data = b"\x00\x10" + GUID.encode("ascii") + HEADER + b"cut off mid-fra"
+    wal = _write(tmp_path, data)
+    results = mod.extract_candidates(wal, GUID, warn=True)
+    assert results == []
+    assert "torn final WAL frame" in capsys.readouterr().err

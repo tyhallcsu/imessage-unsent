@@ -47,6 +47,7 @@ def extract_candidates(
     seen: set[str] = set()
     results: list[tuple[int, str]] = []
     truncated_hits = 0
+    eof_hits = 0
     for offset in hits:
         after = data[offset + len(needle) : offset + len(needle) + window]
         end = after.find(TYPEDSTREAM_MARKER)
@@ -57,6 +58,10 @@ def extract_candidates(
             # rather than silent.
             if len(after) >= window and _looks_like_text(after):
                 truncated_hits += 1
+            elif after and _looks_like_text(after):
+                # Text runs to end-of-file inside the window: a torn final
+                # frame. Was the last silent-drop path after #110/#121.
+                eof_hits += 1
             continue
         if end == 0:
             # Marker sits immediately after the GUID: no inline text to recover.
@@ -75,10 +80,13 @@ def extract_candidates(
         if not any(char.isprintable() for char in text):
             continue
 
-        key = text[:120]
-        if key in seen:
+        # Dedup on the FULL text: two pre-retract page versions of a long
+        # message can share a 120-char prefix and differ after it — the
+        # prefix key silently discarded one of them (F-L8), potentially the
+        # candidate whose exact length matches the retraction metadata.
+        if text in seen:
             continue
-        seen.add(key)
+        seen.add(text)
         results.append((offset, text))
 
     if warn and truncated_hits:
@@ -86,6 +94,13 @@ def extract_candidates(
             f"wal_extract: {truncated_hits} GUID hit(s) had text extending past "
             f"the {window}-byte scan window; a longer message may be truncated. "
             f"Re-run with --window to widen the scan.",
+            file=sys.stderr,
+        )
+    if warn and eof_hits:
+        print(
+            f"wal_extract: {eof_hits} GUID hit(s) had text running to the end "
+            f"of the file (torn final WAL frame?); that text was not "
+            f"extractable.",
             file=sys.stderr,
         )
     return results
@@ -143,7 +158,16 @@ def main() -> int:
         return 0
 
     for offset, text in results:
-        print(f"{offset}\t{len(text)}\t{text}")
+        # One physical line per record: raw newlines/tabs in recovered text
+        # split the TSV into garbage rows downstream (F-L6). The JSON path
+        # carries the exact bytes; this pretty path is for the human report.
+        escaped = (
+            text.replace("\\", "\\\\")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
+        )
+        print(f"{offset}\t{len(text)}\t{escaped}")
     return 0
 
 

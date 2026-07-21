@@ -43,10 +43,12 @@ def main() -> int:
     for path, label in sources:
         try:
             for offset, text in extract_candidates(path, args.guid):
-                key = text[:120]
-                if key in seen:
+                # Full-text dedup (F-L8): a live-WAL candidate must not
+                # suppress a DIFFERENT history-buffer text sharing its
+                # 120-char prefix.
+                if text in seen:
                     continue
-                seen.add(key)
+                seen.add(text)
                 merged.append({
                     "offset": offset,
                     "length": len(text),

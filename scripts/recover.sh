@@ -518,7 +518,14 @@ else
   # Search WAL for the GUID; it appears in the messages page record near the original text.
   log "  searching for GUID byte string..."
   HITS=$(grep -aob "$GUID" "$WAL" | cut -d: -f1)
-  log "  GUID occurrences in WAL: $(printf '%s\n' "$HITS" | wc -l | tr -d ' ')"
+  # printf '%s\n' "" is one empty line, so wc -l said 1 on a total miss —
+  # misleading triage into thinking the WAL held the row (F-L5).
+  if [[ -n "$HITS" ]]; then
+    HIT_COUNT=$(printf '%s\n' "$HITS" | wc -l | tr -d ' ')
+  else
+    HIT_COUNT=0
+  fi
+  log "  GUID occurrences in WAL: $HIT_COUNT"
 
   WAL_RESULTS=$(imu_extract_from_wal "$WAL" "$GUID")
   imu_extract_from_wal_json "$WAL" "$GUID" > "$WAL_JSON"
@@ -529,8 +536,9 @@ else
     FAILURE_CATEGORY="wal_checkpointed"
   else
     while IFS=$'\t' read -r off len text; do
-      text_repr=$(python3 -c 'import sys; print(repr(sys.argv[1]))' "$text")
-      line="WAL_OFFSET $off  LEN $len  TEXT: $text_repr"
+      # The extractor pre-escapes newlines/tabs, so the field is one line
+      # and safe to embed directly (F-L6).
+      line="WAL_OFFSET $off  LEN $len  TEXT: '$text'"
       log "  $line"
       printf "%s\n" "$line" >> "$WORK/wal-hits.txt"
     done <<< "$WAL_RESULTS"
@@ -550,8 +558,7 @@ else
       HIST_RESULTS=$(imu_extract_from_wal "$HIST" "$GUID" 2>/dev/null || true)
       if [[ -n "$HIST_RESULTS" ]]; then
         while IFS=$'\t' read -r off len text; do
-          text_repr=$(python3 -c 'import sys; print(repr(sys.argv[1]))' "$text")
-          line="WAL_HISTORY $(basename "$HIST")  OFFSET $off  LEN $len  TEXT: $text_repr"
+          line="WAL_HISTORY $(basename "$HIST")  OFFSET $off  LEN $len  TEXT: '$text'"
           log "  $line"
           printf "%s\n" "$line" >> "$WORK/wal-hits.txt"
         done <<< "$HIST_RESULTS"

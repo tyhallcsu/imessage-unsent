@@ -6,7 +6,7 @@ BATS := $(shell command -v bats 2>/dev/null)
 # and tests/python/test_json_report.py were never ruff/py_compile checked). See #116.
 # The glob already covers this PR's scripts/edit-history.py + tests/python/test_edit_history.py.
 PYTHON_SOURCES := $(wildcard scripts/*.py scripts/lib/*.py tests/python/*.py)
-SHELL_SOURCES := scripts/*.sh scripts/lib/*.sh tests/fixtures/*.sh tests/bats/helpers.bash
+SHELL_SOURCES := scripts/*.sh scripts/lib/*.sh script/*.sh tests/fixtures/*.sh tests/bats/helpers.bash
 
 .PHONY: fixture fixture-check shellcheck python-check bats python-test test \
 	daemon-build daemon-test daemon-install daemon-uninstall \
@@ -86,7 +86,9 @@ doctor:
 #   make rc-smoke VERSION=v0.4.0-rc1
 #   make rc-smoke VERSION=v0.4.0-rc1 OUTPUT_DIR=dist
 rc-smoke:
-	bash scripts/rc_smoke.sh $(VERSION) $(OUTPUT_DIR)
+	# Env-passed, not positional: `make rc-smoke OUTPUT_DIR=dist` without
+	# VERSION= used to feed the dir as the version string and exit 2.
+	VERSION="$(VERSION)" OUTPUT_DIR="$(OUTPUT_DIR)" bash scripts/rc_smoke.sh
 
 # Build distributable release artifacts (daemon tarball + GUI .app zip + sha256s).
 # Usage: make release VERSION=v0.4.0
