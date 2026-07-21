@@ -100,22 +100,16 @@ gui/Sources/IMUMenuBar/Views/SettingsWindow.swift       # Settings UI
 
 ## Currently in flight
 
-Always `gh pr list --state open` for the live state. As of 2026-07-17, v0.1–v0.3
-milestones are fully delivered (latest tag `v0.3.0-rc1`; app is `iMessage Unsent.app`,
-bundle `com.imessage-unsent.app`). The PRs that were "in flight" in the first draft of
-this file (#55/#56/#63/#64/#66/#68) are all now merged or closed — do not treat them as open.
-
-Open PR:
-- **#107** — `feat`: recover prior versions of *edited* (non-retracted) messages from the
-  `message_summary_info` `ec` chain (closes #106). Separate CLI (`scripts/edit-history.py`).
+Always `gh pr list --state open` for the live state. As of 2026-07-20, the v0.5
+code cycle is merged (check `gh release list` for the current stable tag; app is
+`iMessage Unsent.app`, bundle `com.imessage-unsent.app`). The 2026-07 v0.5 cycle closed the FABLE5 review's
+remaining Mediums plus a fresh three-domain audit (see
+`docs/V0.5-AUDIT-REPORT.md` and `docs/handoffs/V0.5-CYCLE-HANDOFF.md`).
 
 Open issues to watch:
-- **#108–#116** — findings from the 2026-07 review (`docs/FABLE5-ULTRACODE-REVIEW.md`):
-  daemon subprocess pipe-deadlock/timeout (#108), corrupt-`state.json` crash loop (#109),
-  WAL extractor long-message window (#110), size-only WAL change detection (#111),
-  CLI `/tmp` hardening (#112), control-socket doc drift (#113), docs reconciliation (#114),
-  release-workflow hardening (#115), Makefile lint gap (#116).
-- **#96** — audit/findings tracker (post-v0.2.1-rc1).
+- **#127** — add actionlint (and consider zizmor) to CI.
+- **#96** — audit/findings tracker (post-v0.2.1-rc1); superseded in practice by
+  `docs/V0.5-AUDIT-REPORT.md`, which lists every remaining documented-only Low.
 - **#16 / #15** — Restore mode research (write to chat.db). `ethics-review-required`,
   feature-flagged off; needs consent-flow UI before unflagging.
 - **#26** — Roadmap (pinned). Phase ordering and milestone dependencies live here.

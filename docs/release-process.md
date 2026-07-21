@@ -89,9 +89,14 @@ The following GitHub Actions secrets enable full Developer ID signing + notariza
 |---|---|
 | `APPLE_DEVELOPER_ID_CERT_BASE64` | Developer ID Application cert (`.p12`), base64-encoded |
 | `APPLE_DEVELOPER_ID_CERT_PASSWORD` | Password for the `.p12` |
-| `APPLE_NOTARIZE_USER` | App Store Connect API key issuer ID OR Apple ID for notarytool |
-| `APPLE_NOTARIZE_PASSWORD` | Notary service password (or App Store Connect API key) |
+| `APPLE_DEVELOPER_ID_NAME` | Exact certificate common name codesign signs with (e.g. `Developer ID Application: <handle> (TEAMID)`) — **required**; without it signing skips |
 | `APPLE_TEAM_ID` | Developer Team ID |
+| `APPLE_NOTARIZE_USER` | Apple ID for `notarytool submit --apple-id` |
+| `APPLE_NOTARIZE_PASSWORD` | App-specific password for that Apple ID |
+
+All four `APPLE_DEVELOPER_ID_*`/`APPLE_TEAM_ID` signing secrets must be
+present for signing to run at all; the two notarize secrets additionally
+enable notarization + stapling. See `scripts/sign-release.sh`.
 
 If any are missing, the signing step will skip with a clear log and the
 unsigned artifacts will still be uploaded — forks should not be blocked from
@@ -99,10 +104,17 @@ producing testable builds.
 
 ## What the workflow does, in order
 
-1. **Verify the tag** matches `vMAJOR.MINOR.PATCH(-prerelease)?`. Reject otherwise.
-2. **Restore caches** for `daemon/.build` and `gui/.build`.
-3. **Run tests** for both Swift packages — a red test gates the release.
-4. **`scripts/build-release.sh`** builds release-mode binaries, assembles the
+1. **Verify the tag**: semver shape (`vMAJOR.MINOR.PATCH(-prerelease)?`) AND
+   ancestry — the tag must point at a commit already on `origin/main`
+   (CI-on-main is the test gate; the workflow deliberately does **not**
+   re-run Swift tests).
+2. **Check out the verified tag** in every job, so re-building an old tag
+   ships that tag's tree and notes, not `main` HEAD.
+3. **Version-drift gate**: `imuDaemonVersion` in
+   `daemon/Sources/IMUCore/Version.swift` must match the tag's base semver,
+   or the build fails.
+4. **Restore caches** for `daemon/.build` and `gui/.build`, then
+   **`scripts/build-release.sh`** builds release-mode binaries, assembles the
    GUI .app bundle (with `CFBundleShortVersionString` and `CFBundleVersion`
    set from the tag), regenerates `AppIcon.icns` from
    `assets/MacOS_AppIcon_iMessage_Unsent.png` via `scripts/build-app-icon.sh`
@@ -120,9 +132,10 @@ producing testable builds.
 - **Tag rejected as not semver** — the tag must start with `v` and use three
   numeric components (`v0.4.0`), with an optional `-prerelease` suffix
   (`v0.4.0-rc1`). Double-check for typos like `0.4.0` or `v0.4`.
-- **Tests fail in the workflow but pass locally** — the workflow uses cached
+- **Build fails only in the workflow** — the release build uses cached
   `.build` directories. Bump cache keys or delete the cache from the Actions
-  UI to force a clean build.
+  UI to force a clean build. (Swift *tests* never run in this workflow —
+  they are gated by CI on `main` before the tag can pass the ancestry check.)
 - **Release exists already** — the workflow uses `gh release create`, which
   fails if the tag already has a release. Delete the existing release (and
   the underlying tag if needed) before re-running. Don't re-tag the same

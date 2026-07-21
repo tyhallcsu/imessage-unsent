@@ -91,3 +91,10 @@ The repository's `.gitignore` excludes:
 - `imessage-recovery/` — the conventional working directory used by the script.
 
 If you fork this repo and run the script, **never push the `imessage-recovery/` working tree**. Verify with `git status` before committing.
+
+**Uninstall does not delete recovered data.** `make daemon-uninstall` removes
+the LaunchAgent and binary but intentionally leaves `archives/` (recovered
+plaintext), `state.json`, and `~/Library/Logs/imessage-unsent/` in place so
+forensic output survives an uninstall. Remove
+`~/Library/Application Support/imessage-unsent/` and the log directory
+yourself to erase all data.

@@ -447,7 +447,7 @@ The menu-bar icon flips from `xmark.octagon` (Daemon Down) to `checkmark.circle`
 
 - **"Open History"** → window listing recovered messages, "Open archive" reveals the archive folder in Finder.
 - **"Open Settings"** → daemon status, version, uptime, recovery count, last error, data dir.
-- The daemon also fires a native macOS notification on each recovery (the first one will trigger the macOS notification permission prompt).
+- Native macOS notifications are posted by the **menu bar app** (not the daemon — a non-bundled CLI cannot use `UNUserNotificationCenter`). Enable them via Settings → Notifications → "Enable notifications".
 
 Where things live after `make daemon-install`:
 
@@ -457,9 +457,15 @@ Where things live after `make daemon-install`:
 | `~/Library/Application Support/imessage-unsent/bin/imu-watcher`   | Installed daemon binary                  |
 | `~/Library/Application Support/imessage-unsent/scripts/`          | Copy of `scripts/` used by recovery      |
 | `~/Library/Application Support/imessage-unsent/archives/`         | One subdirectory per recovery (mode 0700)|
-| `~/Library/Application Support/imessage-unsent/daemon.sock`       | Read-only control socket (mode 0600)     |
+| `~/Library/Application Support/imessage-unsent/daemon.sock`       | Control socket (mode 0600; archive delete/compact only)|
 | `~/Library/Logs/imessage-unsent/watcher.log`                      | Daemon stdout + stderr                   |
 | `~/.config/imessage-unsent/config.toml`                           | Optional config (defaults are fine)      |
+
+> [!NOTE]
+> `make daemon-uninstall` removes the LaunchAgent and binary but **intentionally
+> leaves** `archives/` (recovered plaintext), `state.json`, and logs behind so
+> forensic output survives an uninstall. Delete
+> `~/Library/Application Support/imessage-unsent/` yourself to remove all data.
 
 Tail the daemon log:
 
@@ -515,7 +521,7 @@ It prints a `[PASS]`/`[FAIL]`/`[SKIP]` summary table at the end and exits nonzer
 
 ## Daemon control socket
 
-When the watcher daemon is running it serves a **read-only** Unix-domain socket at `~/Library/Application Support/imessage-unsent/daemon.sock` (mode `0600`, same-user only). The menu-bar app uses it to render status and the recovery history; you can also probe it directly:
+When the watcher daemon is running it serves a Unix-domain socket at `~/Library/Application Support/imessage-unsent/daemon.sock` (mode `0600`, same-user only) with a hard op allowlist: `ping`/`status`/`recent` are read-only; `delete` and `compact` mutate **archive directories only** — no socket op can ever touch the live `chat.db` or daemon config (see SECURITY.md). The menu-bar app uses it to render status and the recovery history; you can also probe it directly:
 
 ```bash
 # liveness check
@@ -526,7 +532,7 @@ echo '{"op":"ping"}' | nc -U ~/Library/Application\ Support/imessage-unsent/daem
 echo '{"op":"status"}' | nc -U ~/Library/Application\ Support/imessage-unsent/daemon.sock
 # {"ok":true,"status":{"data_dir":"...","last_error":null,"last_wal_change_at":"...",
 #  "last_wal_size":4096,"notifications_show":true,"recovery_count":3,"started_at":"...",
-#  "state":"watching","uptime_seconds":42,"version":"0.2.0"}}
+#  "state":"watching","uptime_seconds":42,"version":"0.5.0"}}
 
 # most recent recoveries (limit 1..50, default 5)
 echo '{"op":"recent","limit":3}' | nc -U ~/Library/Application\ Support/imessage-unsent/daemon.sock
@@ -562,11 +568,11 @@ Total time from realizing the message was unsent → recovered text: ~25 minutes
 ## Modes — Recover vs Restore
 
 > [!IMPORTANT]
-> v0.2 ships **Recover (Notify-only)** and only Recover. Restore mode is a research track that requires explicit opt-in and a per-invocation consent flow. The CLI and daemon **never** modify live `chat.db` in any released code path.
+> Every release since v0.2 ships **Recover (Notify-only)** and only Recover. Restore mode is a research track that requires explicit opt-in and a per-invocation consent flow. The CLI and daemon **never** modify live `chat.db` in any released code path.
 
 |                              | **Recover** (Notify-only)                                | **Restore** (experimental, *not yet shipped*)              |
 | ---------------------------- | -------------------------------------------------------- | ---------------------------------------------------------- |
-| **Status**                   | ✅ Ships in v0.2                                          | 🚧 Tracked by [#16](https://github.com/tyhallcsu/imessage-unsent/issues/16); not implemented yet |
+| **Status**                   | ✅ Shipped (since v0.2)                                          | 🚧 Tracked by [#16](https://github.com/tyhallcsu/imessage-unsent/issues/16); not implemented yet |
 | **Live `chat.db` writes**    | **Never**. Read-only via `sqlite3 -readonly` and `SQLITE_OPEN_READONLY`. | Permitted only after consent flow + explicit opt-in.       |
 | **Apple Messages UI**        | Still shows "X unsent a message"                         | Would patch the row so the original text reappears         |
 | **iCloud sync risk**         | None (no writes)                                         | High — write may resync to other devices and overwrite     |
