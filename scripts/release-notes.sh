@@ -118,10 +118,10 @@ cat <<'TAIL'
 
 ## Artifacts
 
-- `imu-watcher-VERSION-<arch>.tar.gz` — daemon binary + recovery scripts + LaunchAgent template (UNSIGNED)
-- `iMessage-Unsent-VERSION.zip` — menu bar app bundle (UNSIGNED)
+- `imu-watcher-VERSION-<arch>.tar.gz` — daemon binary + recovery scripts + LaunchAgent template
+- `iMessage-Unsent-VERSION.zip` — menu bar app bundle
 - Each artifact has a sibling `.sha256` file with the SHA-256 checksum.
 
 > [!NOTE]
-> Artifacts are unsigned. macOS Gatekeeper will warn on first launch. Use `xattr -d com.apple.quarantine <path>` to clear the warning, or wait for a signed/notarized build (tracked in issues #19 and #20).
+> Signing is credential-driven (see docs/code-signing.md): verify with `codesign --verify --deep --strict` on the extracted app. Unsigned or ad-hoc builds trip Gatekeeper on first launch — clear with `xattr -d com.apple.quarantine <path>`.
 TAIL
