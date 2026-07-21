@@ -81,6 +81,7 @@ public enum ArchiveCompactor {
 
     var bytesReclaimed: Int64 = 0
     var removed: [String] = []
+    var failedRemovals: [String] = []
     let contents = (try? fileManager.contentsOfDirectory(
       at: archiveDir,
       includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey],
@@ -98,12 +99,17 @@ public enum ArchiveCompactor {
         bytesReclaimed += size
         removed.append(name)
       } catch {
-        // Non-fatal — log via the throwing path? For now skip and keep going.
+        // Non-fatal, but it must be RECORDED: writing "compacted" while
+        // bytes remain on disk made alreadyCompacted refuse every retry
+        // forever and under-reported bytes_reclaimed (#144 / F-L7).
+        failedRemovals.append(name)
         continue
       }
     }
 
-    manifest.compactionState = "compacted"
+    // "partial" stays retryable — the alreadyCompacted gate only fires on
+    // "compacted", so a later compact can finish the job.
+    manifest.compactionState = failedRemovals.isEmpty ? "compacted" : "partial"
     manifest.compactedAt = ISO8601DateFormatter.archiveCompactionISO.string(from: now)
 
     do {

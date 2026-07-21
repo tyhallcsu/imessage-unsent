@@ -276,11 +276,36 @@ public final class RecoveryNotifier {
       nativePoster.post(notification)
     }
     if let webhookURL = URL(string: config.webhook), !config.webhook.isEmpty {
+      guard Self.isAllowedWebhookURL(webhookURL) else {
+        // Recovered message text (reversible base64) rides the body — it
+        // must not leave the machine over cleartext (#144 / F-L3). HMAC
+        // signing authenticates but does not encrypt.
+        fputs(
+          "imu-watcher: webhook skipped — scheme "
+            + "'\(webhookURL.scheme ?? "none")' not allowed; use https:// "
+            + "(http:// permitted for localhost only)\n",
+          stderr
+        )
+        return
+      }
       webhookDelivery.deliver(
         body: notification.recoveryJSON,
         webhookURL: webhookURL,
         signingSecret: config.webhookSigningSecret
       )
+    }
+  }
+
+  /// https always; cleartext http only for loopback development targets.
+  static func isAllowedWebhookURL(_ url: URL) -> Bool {
+    switch url.scheme?.lowercased() {
+    case "https":
+      return true
+    case "http":
+      let host = url.host?.lowercased() ?? ""
+      return host == "localhost" || host == "127.0.0.1" || host == "::1"
+    default:
+      return false
     }
   }
 }
