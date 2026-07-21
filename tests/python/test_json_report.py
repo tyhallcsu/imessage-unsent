@@ -140,3 +140,41 @@ def test_uses_iphone_backup_when_wal_hit_is_not_human_readable(repo_root, tmp_pa
     assert payload["recovered"]["source"] == "iphone_backup"
     assert payload["recovered"]["text_b64"] == "aGVsbG8="
     assert "failure_category" not in payload["recovered"]
+
+
+def test_merge_keeps_distinct_texts_sharing_prefix_across_sources(repo_root, tmp_path):
+    """F-L8 in wal_merge_candidates (#150): a live-WAL candidate must not
+    suppress a DIFFERENT history-buffer text sharing its 120-char prefix."""
+    import importlib.util
+    import json
+    import subprocess
+    import sys
+
+    script = repo_root / "scripts" / "lib" / "wal_extract.py"
+    spec = importlib.util.spec_from_file_location("imu_wal_extract_m", script)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["imu_wal_extract_m"] = mod
+    spec.loader.exec_module(mod)
+
+    guid = "00000000-0000-0000-0000-0000000000AA"
+    prefix = "B" * 120
+
+    def record(text: str) -> bytes:
+        return b"\x00\x10" + guid.encode() + b"\x06" + text.encode() + mod.TYPEDSTREAM_MARKER + b"\xff"
+
+    live = tmp_path / "chat.db-wal"
+    live.write_bytes(record(prefix + "live-tail"))
+    hist_dir = tmp_path / "wal-history"
+    hist_dir.mkdir()
+    (hist_dir / "2026-04-30T120000.000Z-1024.db-wal").write_bytes(record(prefix + "hist-tail"))
+
+    merge = repo_root / "scripts" / "lib" / "wal_merge_candidates.py"
+    out = subprocess.run(
+        [sys.executable, str(merge), "--live", str(live), "--history-dir", str(hist_dir), "--guid", guid],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    merged = json.loads(out.stdout)
+    texts = sorted(entry["text"] for entry in merged)
+    assert texts == [prefix + "hist-tail", prefix + "live-tail"]
