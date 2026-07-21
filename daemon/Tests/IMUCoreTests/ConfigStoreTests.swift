@@ -142,3 +142,47 @@ final class ConfigStoreTests: XCTestCase {
     XCTAssertEqual(loaded, config)
   }
 }
+
+// MARK: - Quote-aware comment stripping + private save (#144)
+
+extension ConfigStoreTests {
+  func testHashInsideQuotedValueSurvivesRoundTrip() throws {
+    var config = DaemonConfig()
+    config.notifications.webhookSigningSecret = "abc#def#ghi"
+    config.notifications.webhook = "https://example.com/hook#fragment"
+
+    let reparsed = ConfigStore.parse(ConfigStore.serialize(config))
+
+    XCTAssertEqual(reparsed.notifications.webhookSigningSecret, "abc#def#ghi")
+    XCTAssertEqual(reparsed.notifications.webhook, "https://example.com/hook#fragment")
+    XCTAssertEqual(reparsed, config, "parse(serialize(c)) == c must hold for #-bearing values")
+  }
+
+  func testCommentsOutsideQuotesAreStillStripped() throws {
+    let toml = """
+    log_level = "debug"  # trailing comment
+    # full-line comment
+    [notifications]
+    webhook = "https://example.com/a#b" # another comment
+    """
+    let parsed = ConfigStore.parse(toml)
+    XCTAssertEqual(parsed.logLevel, "debug")
+    XCTAssertEqual(parsed.notifications.webhook, "https://example.com/a#b")
+  }
+
+  func testSaveWritesOwnerOnlyPermissions() throws {
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("imu-cfg-\(UUID().uuidString.prefix(8))", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let url = dir.appendingPathComponent("config.toml")
+    let store = ConfigStore(url: url)
+    var config = DaemonConfig()
+    config.notifications.webhookSigningSecret = "not-a-real-secret"
+
+    try store.save(config)
+
+    let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+    let mode = (attrs[.posixPermissions] as? NSNumber)?.uint16Value ?? 0
+    XCTAssertEqual(mode & 0o777, 0o600, "config.toml carries the signing secret — owner-only")
+  }
+}

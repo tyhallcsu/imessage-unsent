@@ -136,3 +136,28 @@ extension ConfigFileStoreTests {
     XCTAssertEqual(mode & 0o777, 0o600)
   }
 }
+
+extension ConfigFileStoreTests {
+  func testHashInsideQuotedValueSurvivesRoundTrip() {
+    var config = SettingsConfig()
+    config.notifications.webhookSigningSecret = "abc#def#ghi"
+    config.notifications.webhook = "https://example.com/hook#fragment"
+
+    let reparsed = ConfigFileStore.parse(ConfigFileStore.serialize(config))
+
+    XCTAssertEqual(reparsed.notifications.webhookSigningSecret, "abc#def#ghi")
+    XCTAssertEqual(reparsed.notifications.webhook, "https://example.com/hook#fragment")
+    XCTAssertEqual(reparsed, config)
+  }
+
+  func testCommentsOutsideQuotesAreStillStripped() {
+    let toml = """
+    log_level = "debug"  # trailing comment
+    [notifications]
+    webhook = "https://example.com/a#b" # another comment
+    """
+    let parsed = ConfigFileStore.parse(toml)
+    XCTAssertEqual(parsed.logLevel, "debug")
+    XCTAssertEqual(parsed.notifications.webhook, "https://example.com/a#b")
+  }
+}

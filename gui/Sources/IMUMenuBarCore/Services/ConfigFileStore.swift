@@ -42,13 +42,39 @@ public final class ConfigFileStore: ConfigFileStoring {
     try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
   }
 
+  /// Strips a trailing comment — only a `#` OUTSIDE a quoted string starts a
+  /// comment. Splitting on the first raw `#` truncated quoted values
+  /// ("abc#def" parsed back as `"abc`), corrupting saved signing secrets and
+  /// URLs and breaking the parse(serialize(c)) == c contract (#144).
+  private static func stripComment(_ line: Substring) -> String {
+    var inQuotes = false
+    var escaped = false
+    for (index, character) in zip(line.indices, line) {
+      if escaped {
+        escaped = false
+        continue
+      }
+      switch character {
+      case "\\" where inQuotes:
+        escaped = true
+      case "\"":
+        inQuotes.toggle()
+      case "#" where !inQuotes:
+        return String(line[..<index])
+      default:
+        break
+      }
+    }
+    return String(line)
+  }
+
   /// Public for tests; mirrors the daemon's `ConfigStore.parse` shape.
   public static func parse(_ text: String) -> SettingsConfig {
     var config = SettingsConfig()
     var section = ""
 
     for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
-      let uncommented = rawLine.split(separator: "#", maxSplits: 1).first.map(String.init) ?? ""
+      let uncommented = stripComment(rawLine)
       let line = uncommented.trimmingCharacters(in: .whitespaces)
       guard !line.isEmpty else { continue }
 

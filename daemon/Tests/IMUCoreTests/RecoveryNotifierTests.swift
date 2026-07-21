@@ -284,3 +284,26 @@ private final class StubAuthorizationProbe: NotificationAuthorizationProbing {
     completion(status)
   }
 }
+
+// MARK: - Webhook scheme allowlist (#144 / F-L3)
+
+extension RecoveryNotifierTests {
+  func testWebhookAllowsHTTPSAnywhere() {
+    XCTAssertTrue(RecoveryNotifier.isAllowedWebhookURL(URL(string: "https://example.com/imu")!))
+    XCTAssertTrue(RecoveryNotifier.isAllowedWebhookURL(URL(string: "HTTPS://EXAMPLE.COM/imu")!))
+  }
+
+  func testWebhookAllowsCleartextHTTPOnlyForLoopback() {
+    XCTAssertTrue(RecoveryNotifier.isAllowedWebhookURL(URL(string: "http://localhost:8080/hook")!))
+    XCTAssertTrue(RecoveryNotifier.isAllowedWebhookURL(URL(string: "http://127.0.0.1/hook")!))
+    XCTAssertFalse(
+      RecoveryNotifier.isAllowedWebhookURL(URL(string: "http://example.com/hook")!),
+      "recovered text must not leave the machine over cleartext http"
+    )
+  }
+
+  func testWebhookRejectsNonHTTPSchemes() {
+    XCTAssertFalse(RecoveryNotifier.isAllowedWebhookURL(URL(string: "ftp://example.com/x")!))
+    XCTAssertFalse(RecoveryNotifier.isAllowedWebhookURL(URL(string: "file:///tmp/x")!))
+  }
+}

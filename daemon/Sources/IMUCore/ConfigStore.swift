@@ -95,6 +95,9 @@ public struct ConfigStore {
     )
     let text = Self.serialize(config)
     try text.write(to: url, atomically: true, encoding: .utf8)
+    // Carries webhook_signing_secret in plaintext; owner-only, re-applied on
+    // every save because atomic writes replace the inode (#144).
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
   }
 
   /// Returns the canonical TOML representation of `config`. The output round-
@@ -147,12 +150,39 @@ public struct ConfigStore {
     return escaped
   }
 
+
+  /// Strips a trailing comment — only a `#` OUTSIDE a quoted string starts a
+  /// comment. Splitting on the first raw `#` truncated quoted values
+  /// ("abc#def" parsed back as `"abc`), corrupting saved signing secrets and
+  /// URLs and breaking the parse(serialize(c)) == c contract (#144).
+  private static func stripComment(_ line: Substring) -> String {
+    var inQuotes = false
+    var escaped = false
+    for (index, character) in zip(line.indices, line) {
+      if escaped {
+        escaped = false
+        continue
+      }
+      switch character {
+      case "\\" where inQuotes:
+        escaped = true
+      case "\"":
+        inQuotes.toggle()
+      case "#" where !inQuotes:
+        return String(line[..<index])
+      default:
+        break
+      }
+    }
+    return String(line)
+  }
+
   public static func parse(_ text: String) -> DaemonConfig {
     var config = DaemonConfig()
     var section = ""
 
     for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
-      let uncommented = rawLine.split(separator: "#", maxSplits: 1).first.map(String.init) ?? ""
+      let uncommented = stripComment(rawLine)
       let line = uncommented.trimmingCharacters(in: .whitespaces)
       guard !line.isEmpty else {
         continue
