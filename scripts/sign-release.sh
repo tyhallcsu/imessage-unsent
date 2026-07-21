@@ -90,14 +90,19 @@ if [[ ! -f "$ENTITLEMENTS" ]]; then
 fi
 
 # Import the cert into a temporary keychain so we don't pollute the runner's
-# default keychain, and so the keychain disappears at end-of-job.
-KEYCHAIN_PATH="${RUNNER_TEMP:-/tmp}/imu-release.keychain-db"
+# default keychain, and so the keychain disappears at end-of-job. The staging
+# dir is a fresh 0700 mktemp -d (#151 / R-2): the old fixed /tmp paths let
+# another local user pre-create/read the .p12 during a documented local
+# signing run — same class as the F-M1 recover.sh hardening.
+umask 077
+SIGN_TMP_DIR="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/imu-sign.XXXXXX")"
+KEYCHAIN_PATH="$SIGN_TMP_DIR/imu-release.keychain-db"
 KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
-CERT_PATH="${RUNNER_TEMP:-/tmp}/imu-release-cert.p12"
+CERT_PATH="$SIGN_TMP_DIR/imu-release-cert.p12"
 
 cleanup() {
   security delete-keychain "$KEYCHAIN_PATH" >/dev/null 2>&1 || true
-  rm -f "$CERT_PATH"
+  rm -rf "$SIGN_TMP_DIR"
 }
 trap cleanup EXIT
 

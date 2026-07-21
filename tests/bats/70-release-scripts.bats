@@ -191,3 +191,57 @@ load helpers
   [[ "$output" == *"APPLE_DEVELOPER_ID_CERT_PASSWORD"* ]]
   [[ "$output" == *"APPLE_TEAM_ID"* ]]
 }
+
+# --- standalone tarball install (#151 / R-1) --------------------------------
+
+@test "install-daemon.sh installs the shipped tarball layout without swift build" {
+  # Simulate the extracted release tarball: prebuilt binary + plist template
+  # + scripts/ sitting NEXT TO the script (shipped as install.sh). The old
+  # installer resolved everything repo-relative and hard-failed here.
+  local stage="$BATS_TEST_TMPDIR/tarball"
+  mkdir -p "$stage/scripts"
+  printf '#!/bin/sh\nexit 0\n' > "$stage/imu-watcher"
+  chmod +x "$stage/imu-watcher"
+  cp "$REPO_DIR/daemon/com.imu.watcher.plist" "$stage/com.imu.watcher.plist"
+  cp "$REPO_DIR/scripts/recover.sh" "$stage/scripts/recover.sh"
+  cp -R "$REPO_DIR/scripts/lib" "$stage/scripts/lib"
+  cp "$REPO_DIR/scripts/install-daemon.sh" "$stage/install.sh"
+  chmod +x "$stage/install.sh"
+
+  # swift must NOT be invoked in this layout; launchctl is stubbed out.
+  local stub_bin="$BATS_TEST_TMPDIR/stub-bin"
+  mkdir -p "$stub_bin"
+  printf '#!/bin/sh\necho "swift must not run in tarball layout" >&2\nexit 97\n' > "$stub_bin/swift"
+  printf '#!/bin/sh\nexit 0\n' > "$stub_bin/launchctl"
+  chmod +x "$stub_bin/swift" "$stub_bin/launchctl"
+
+  local fake_home="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$fake_home"
+
+  run env HOME="$fake_home" PATH="$stub_bin:$PATH" bash "$stage/install.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"swift must not run"* ]]
+
+  [ -x "$fake_home/Library/Application Support/imessage-unsent/bin/imu-watcher" ]
+  [ -f "$fake_home/Library/Application Support/imessage-unsent/scripts/recover.sh" ]
+  [ -f "$fake_home/Library/LaunchAgents/com.imu.watcher.plist" ]
+  grep -q "$fake_home/Library/Application Support/imessage-unsent/bin/imu-watcher" \
+    "$fake_home/Library/LaunchAgents/com.imu.watcher.plist"
+}
+
+@test "install-daemon.sh repo layout still routes through swift build" {
+  # Guard the OTHER branch: from a checkout (no sibling prebuilt binary),
+  # the installer must attempt the source build. The stub swift fails fast,
+  # which is exactly the assertion — reaching swift proves branch selection.
+  local stub_bin="$BATS_TEST_TMPDIR/stub-bin2"
+  mkdir -p "$stub_bin"
+  printf '#!/bin/sh\necho "swift invoked"; exit 96\n' > "$stub_bin/swift"
+  chmod +x "$stub_bin/swift"
+
+  local fake_home="$BATS_TEST_TMPDIR/home2"
+  mkdir -p "$fake_home"
+
+  run env HOME="$fake_home" PATH="$stub_bin:$PATH" bash "$REPO_DIR/scripts/install-daemon.sh"
+  [ "$status" -eq 96 ]
+  [[ "$output" == *"swift invoked"* ]]
+}
