@@ -136,7 +136,7 @@ final class WALSnapshotterTests: XCTestCase {
                    "snapshot older than maxAge must be trimmed during the next snapshot")
   }
 
-  func testArchiveToCopiesAllSnapshots() throws {
+  func testArchiveToCopiesAllFreshSnapshots() throws {
     let clock = StubClock(start: Date(timeIntervalSince1970: 1_800_000_000))
     let snapper = WALSnapshotter(walURL: walURL, storeDir: storeDir, clock: clock.now)
 
@@ -152,6 +152,61 @@ final class WALSnapshotterTests: XCTestCase {
     let copied = try FileManager.default.contentsOfDirectory(at: dest, includingPropertiesForKeys: nil)
       .filter { $0.lastPathComponent.hasSuffix(".db-wal") }
     XCTAssertEqual(copied.count, 3)
+  }
+
+  /// #143 / F-M5: snapshots older than maxAge carry no forensic value for a
+  /// fresh retraction — copying them into every archive multiplied disk use
+  /// (retention x WAL size per archive) during quiet-then-active stretches.
+  func testArchiveToSkipsSnapshotsOlderThanMaxAge() throws {
+    let clock = StubClock(start: Date(timeIntervalSince1970: 1_800_000_000))
+    let snapper = WALSnapshotter(
+      walURL: walURL,
+      storeDir: storeDir,
+      maxAge: 300,
+      clock: clock.now
+    )
+
+    try writeWAL(bytes: 1024)
+    _ = try snapper.snapshot()  // becomes stale below
+
+    // Quiet period long past maxAge, then fresh activity. No snapshot()
+    // call in between, so trim never ran and the stale file is still there.
+    clock.advance(by: 1_000)
+    try writeWAL(bytes: 2048)
+    _ = try snapper.snapshot()
+
+    let dest = workDir.appendingPathComponent("archive-out", isDirectory: true)
+    try snapper.archiveTo(dest)
+
+    let copied = try FileManager.default.contentsOfDirectory(at: dest, includingPropertiesForKeys: nil)
+      .filter { $0.lastPathComponent.hasSuffix(".db-wal") }
+    XCTAssertEqual(copied.count, 1, "only the fresh snapshot belongs in the archive")
+    XCTAssertTrue(copied[0].lastPathComponent.contains("-2048.db-wal"))
+  }
+
+  /// #143: without write activity, snapshot() never runs and so never trims —
+  /// the heartbeat calls trimExpired() to age the buffer out during quiet
+  /// periods.
+  func testTrimExpiredRemovesStaleSnapshotsDuringQuietPeriods() throws {
+    let clock = StubClock(start: Date(timeIntervalSince1970: 1_800_000_000))
+    let snapper = WALSnapshotter(
+      walURL: walURL,
+      storeDir: storeDir,
+      maxAge: 300,
+      clock: clock.now
+    )
+
+    try writeWAL(bytes: 1024)
+    _ = try snapper.snapshot()
+    XCTAssertEqual(snapper.snapshotCount(), 1)
+
+    clock.advance(by: 100)
+    snapper.trimExpired()
+    XCTAssertEqual(snapper.snapshotCount(), 1, "fresh snapshots must survive the heartbeat trim")
+
+    clock.advance(by: 500)
+    snapper.trimExpired()
+    XCTAssertEqual(snapper.snapshotCount(), 0, "stale snapshots must be aged out without write activity")
   }
 
   func testSnapshotIsNoOpWhenWALMissing() throws {
