@@ -9,6 +9,7 @@ struct HistoryWindow: View {
   @State private var loadError: String?
   @State private var showingCompactAllConfirmation = false
   @State private var compactAllStatus: String?
+  @State private var isCompactingAll = false
 
   @StateObject private var archiveStats = ArchiveStatsProviderObservable()
 
@@ -29,7 +30,7 @@ struct HistoryWindow: View {
     .frame(minWidth: 520, minHeight: 380)
     .searchable(text: $model.searchText, placement: .toolbar, prompt: "Search by name or handle")
     .onAppear {
-      model.refresh()
+      model.refreshInBackground()
       archiveStats.invalidateAll()
       handlePendingDeepLinkIfAny()
     }
@@ -76,14 +77,21 @@ struct HistoryWindow: View {
       Button {
         showingCompactAllConfirmation = true
       } label: {
-        Label("Compact all", systemImage: "archivebox")
+        if isCompactingAll {
+          HStack(spacing: 6) {
+            ProgressView().controlSize(.small)
+            Text("Compacting…")
+          }
+        } else {
+          Label("Compact all", systemImage: "archivebox")
+        }
       }
-      .disabled(compactCandidateCount == 0)
+      .disabled(compactCandidateCount == 0 || isCompactingAll)
       .help(compactCandidateCount == 0
             ? "Nothing to compact — every archive is already compacted."
             : "Drop snapshot files from \(compactCandidateCount) archives; keep recovered text.")
       Button {
-        model.refresh()
+        model.refreshInBackground()
         archiveStats.invalidateAll()
       } label: {
         Label("Refresh", systemImage: "arrow.clockwise")
@@ -157,31 +165,27 @@ struct HistoryWindow: View {
   }
 
   private func compactAll() {
-    let targets = model.recentEntries.filter { !$0.isCompacted }
-    var ok = 0
-    var failed = 0
-    var bytesReclaimed: Int64 = 0
-    for entry in targets {
-      let result = model.compact(id: entry.id)
-      if result.ok {
-        ok += 1
-        bytesReclaimed += result.bytesReclaimed
-        archiveStats.provider.invalidate(archiveId: entry.id)
-      } else {
-        failed += 1
-      }
-    }
-    archiveStats.objectWillChange.send()
-    let formatter = ByteCountFormatter()
-    formatter.allowedUnits = [.useKB, .useMB, .useGB]
-    formatter.countStyle = .file
-    let humanReclaimed = formatter.string(fromByteCount: bytesReclaimed)
-    if failed == 0 {
-      compactAllStatus = "Compacted \(ok) — reclaimed \(humanReclaimed)"
-    } else {
-      compactAllStatus = "Compacted \(ok), failed \(failed) — reclaimed \(humanReclaimed)"
-    }
+    // Off the main actor (#149 / G-2): the old synchronous loop ran up to
+    // ~50 socket round-trips (plus a full refresh per success) in one click.
+    let targets = model.recentEntries.filter { !$0.isCompacted }.map(\.id)
+    guard !targets.isEmpty, !isCompactingAll else { return }
+    isCompactingAll = true
     Task { @MainActor in
+      let result = await model.compactAllInBackground(ids: targets)
+      for id in targets {
+        archiveStats.provider.invalidate(archiveId: id)
+      }
+      archiveStats.objectWillChange.send()
+      let formatter = ByteCountFormatter()
+      formatter.allowedUnits = [.useKB, .useMB, .useGB]
+      formatter.countStyle = .file
+      let humanReclaimed = formatter.string(fromByteCount: result.bytesReclaimed)
+      if result.failed == 0 {
+        compactAllStatus = "Compacted \(result.ok) — reclaimed \(humanReclaimed)"
+      } else {
+        compactAllStatus = "Compacted \(result.ok), failed \(result.failed) — reclaimed \(humanReclaimed)"
+      }
+      isCompactingAll = false
       try? await Task.sleep(nanoseconds: 4_000_000_000)
       compactAllStatus = nil
     }

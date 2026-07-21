@@ -62,6 +62,7 @@ public final class MenuBarModel: ObservableObject {
   private let archiveCompactor: ArchiveCompacting
   private let statusProvider: (() -> DaemonStatusInfo?)?
   private var timer: Timer?
+  private var backgroundRefreshInFlight = false
 
   public init(
     pinger: DaemonPinging,
@@ -99,13 +100,75 @@ public final class MenuBarModel: ObservableObject {
   }
 
   public func start() {
-    refresh()
+    refreshInBackground()
     timer?.invalidate()
     timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
       Task { @MainActor in
-        self?.refresh()
+        self?.refreshInBackground()
       }
     }
+  }
+
+  /// Off-main fetch of the three socket round-trips, applied back on the
+  /// main actor. The 2s poll used to call the synchronous `refresh()` on the
+  /// main actor — a daemon that accepts but never replies (1s SO_RCVTIMEO
+  /// per call) stalled the UI for up to ~3s every tick (#149 / G-2).
+  /// Coalesces: a tick that lands while a fetch is in flight is dropped.
+  public func refreshInBackground() {
+    guard !backgroundRefreshInFlight else { return }
+    backgroundRefreshInFlight = true
+    let statusProvider = self.statusProvider
+    let pinger = self.pinger
+    let historyProvider = self.historyProvider
+    let entryProvider = self.entryProvider
+    Task.detached(priority: .utility) { [weak self] in
+      let info = statusProvider?()
+      let pingUp = info != nil || pinger.ping()
+      let recoveries = Array(historyProvider.recentRecoveries(limit: 5).prefix(5))
+      let entries = entryProvider.recentEntries(limit: 50)
+      await MainActor.run { [weak self] in
+        guard let self else { return }
+        self.backgroundRefreshInFlight = false
+        self.statusInfo = info
+        if let info {
+          self.status = self.mapState(info.state)
+        } else {
+          self.status = pingUp ? .watching : .down
+        }
+        self.recentRecoveries = recoveries
+        self.recentEntries = entries
+      }
+    }
+  }
+
+  /// Compacts every id off the main actor, then refreshes. `compactAll` from
+  /// the History window used to run up to ~50 synchronous socket round-trips
+  /// (each success also re-fetching everything) on the main actor in one
+  /// click (#149 / G-2).
+  public func compactAllInBackground(ids: [String]) async -> (ok: Int, failed: Int, bytesReclaimed: Int64) {
+    let compactor = self.archiveCompactor
+    let totals = await Task.detached(priority: .utility) { () -> (Int, Int, Int64) in
+      var ok = 0
+      var failed = 0
+      var bytes: Int64 = 0
+      for id in ids {
+        let result = compactor.compactArchive(id: id)
+        if result.ok {
+          ok += 1
+          bytes += result.bytesReclaimed
+        } else {
+          failed += 1
+        }
+      }
+      return (ok, failed, bytes)
+    }.value
+    if totals.1 > 0 {
+      lastActionError = "Compact failed for \(totals.1) archive\(totals.1 == 1 ? "" : "s")."
+    } else {
+      lastActionError = nil
+    }
+    refreshInBackground()
+    return (ok: totals.0, failed: totals.1, bytesReclaimed: totals.2)
   }
 
   public func refresh() {

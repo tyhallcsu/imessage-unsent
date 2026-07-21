@@ -17,6 +17,10 @@ public final class RecoveryWatcher {
   private let pollInterval: TimeInterval
   private let notifier: Notifier
   private let isEnabled: () -> Bool
+  /// Settings' "Preview length" (0–200; 0 = no message text in banners).
+  /// Read per poll so a saved change applies without restarting the watcher.
+  /// Hardcoding 120 here ignored the user's privacy choice (#149 / G-4).
+  private let previewChars: () -> Int
   private let fileManager: FileManager
 
   /// Highest archive id seen so far (lexicographic). Archives are named with
@@ -31,12 +35,14 @@ public final class RecoveryWatcher {
     pollInterval: TimeInterval = 5,
     fileManager: FileManager = .default,
     isEnabled: @escaping () -> Bool,
+    previewChars: @escaping () -> Int = { 80 },
     notifier: @escaping Notifier
   ) {
     self.archivesDir = archivesDir
     self.pollInterval = pollInterval
     self.fileManager = fileManager
     self.isEnabled = isEnabled
+    self.previewChars = previewChars
     self.notifier = notifier
   }
 
@@ -140,7 +146,8 @@ public final class RecoveryWatcher {
        let text = String(data: bytes, encoding: .utf8),
        !text.isEmpty {
       recovered = true
-      body = text.prefix(120).description
+      let limit = max(0, min(200, previewChars()))
+      body = limit == 0 ? "" : text.prefix(limit).description
     }
 
     let handle = (manifest["handle"] as? String) ?? "unknown"
