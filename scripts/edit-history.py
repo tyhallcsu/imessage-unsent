@@ -29,14 +29,20 @@ import json
 import os
 import plistlib
 import re
-import sqlite3
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-APPLE_EPOCH_OFFSET = 978_307_200  # seconds between 1970-01-01 and 2001-01-01
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from chatdb_time import (  # noqa: E402
+    APPLE_EPOCH_OFFSET,
+    apple_ns_to_iso as _apple_ns_to_iso,
+    apple_ns_to_unix_ns as _apple_ns_to_unix_ns,
+    connect_readonly as _connect_readonly,
+    parse_since as _parse_since,
+    since_ns_to_apple_cutoff,
+)
 
 # typedstream NSString-with-plain-text marker. The bytes that follow are:
 #   <length-byte> <utf-8 bytes> ... \x86
@@ -67,19 +73,6 @@ class EditedMessage:
     edited_at_iso: str
     current_text: str | None
     versions: list[EditVersion]
-
-
-def _apple_ns_to_iso(ns: int | float) -> str:
-    if ns is None:
-        return ""
-    seconds = ns / 1_000_000_000 + APPLE_EPOCH_OFFSET
-    return datetime.fromtimestamp(seconds, tz=timezone.utc).astimezone().strftime(
-        "%Y-%m-%d %H:%M:%S %Z"
-    )
-
-
-def _apple_ns_to_unix_ns(ns: int) -> int:
-    return ns + APPLE_EPOCH_OFFSET * 1_000_000_000
 
 
 def _real_apple_to_unix_ns(real: float) -> int:
@@ -187,25 +180,6 @@ def parse_ec_chain(msi_bytes: bytes) -> list[EditVersion]:
     return out
 
 
-def _parse_since(value: str) -> int | None:
-    """Convert `--since` to nanoseconds-from-now. Returns None for `all`."""
-    if value.lower() in ("all", "any", ""):
-        return None
-    m = re.fullmatch(r"(\d+)([smhd])", value.strip().lower())
-    if not m:
-        raise SystemExit(f"--since: bad duration {value!r} (expected e.g. 24h, 7d, all)")
-    n = int(m.group(1))
-    units = {"s": 1, "m": 60, "h": 3_600, "d": 86_400}
-    return n * units[m.group(2)] * 1_000_000_000
-
-
-def _connect_readonly(path: Path) -> sqlite3.Connection:
-    if not path.exists():
-        raise SystemExit(f"chat.db not found: {path}")
-    uri = f"file:{path}?mode=ro"
-    return sqlite3.connect(uri, uri=True)
-
-
 def find_edited_messages(
     db_path: Path,
     handle: str | None = None,
@@ -224,10 +198,8 @@ def find_edited_messages(
             clauses.append("h.id = ?")
             params.append(handle)
         if since_ns is not None:
-            now_ns = int(datetime.now(tz=timezone.utc).timestamp() * 1_000_000_000)
-            cutoff_apple_ns = now_ns - since_ns - APPLE_EPOCH_OFFSET * 1_000_000_000
             clauses.append("m.date_edited >= ?")
-            params.append(cutoff_apple_ns)
+            params.append(since_ns_to_apple_cutoff(since_ns))
         where = " AND ".join(clauses)
         sql = f"""
             SELECT m.ROWID, m.guid, h.id AS handle,

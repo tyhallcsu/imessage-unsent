@@ -8,6 +8,13 @@
 #
 # This test exercises the public CLI surface; a parallel Swift-side guard in
 # IMUCore (`RestoreModeGuard`) covers the daemon path.
+#
+# The standalone Python CLIs (Vector 7 `edit-history.py`, Vector 8
+# `read-receipts.py`) query the live DB directly rather than through a
+# snapshot, so they get their own guards below. They are held to chat.db and
+# chat.db-wal only: SQLite rebuilds the `chat.db-shm` WAL index whenever it
+# attaches to a WAL-mode database, even under `mode=ro`. That file is a
+# rebuildable index, not message data.
 
 load helpers
 
@@ -77,4 +84,77 @@ load helpers
   [ "$before_db" = "$after_db" ]
   [ "$before_wal" = "$after_wal" ]
   [ "$before_shm" = "$after_shm" ]
+}
+
+@test "read-receipts.py leaves the live chat.db and WAL byte-identical" {
+  local root
+  root="$(imu_test_root)/run-3"
+  setup_fixture_recover_env "$root"
+
+  local live_dir="$IMU_TEST_HOME/Library/Messages"
+
+  local before_db before_wal
+  before_db=$(shasum -a 256 "$live_dir/chat.db" | awk '{print $1}')
+  before_wal=$(shasum -a 256 "$live_dir/chat.db-wal" | awk '{print $1}')
+
+  run python3 "$REPO_DIR/scripts/read-receipts.py" \
+    --db "$live_dir/chat.db" \
+    --since all \
+    --audit \
+    --json
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"schema_version": 1'* ]]
+
+  local after_db after_wal
+  after_db=$(shasum -a 256 "$live_dir/chat.db" | awk '{print $1}')
+  after_wal=$(shasum -a 256 "$live_dir/chat.db-wal" | awk '{print $1}')
+
+  [ "$before_db" = "$after_db" ]
+  [ "$before_wal" = "$after_wal" ]
+}
+
+@test "read-receipts.py withholds message text unless --with-text is passed" {
+  local root
+  root="$(imu_test_root)/run-4"
+  setup_fixture_recover_env "$root"
+
+  local live_dir="$IMU_TEST_HOME/Library/Messages"
+
+  run python3 "$REPO_DIR/scripts/read-receipts.py" \
+    --db "$live_dir/chat.db" --since all --json
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"$EXPECTED_TEXT"* ]]
+  [[ "$output" != *"receipt fixture"* ]]
+
+  run python3 "$REPO_DIR/scripts/read-receipts.py" \
+    --db "$live_dir/chat.db" --since all --rowid 400 --with-text --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"receipt fixture"* ]]
+}
+
+@test "edit-history.py leaves the live chat.db and WAL byte-identical" {
+  local root
+  root="$(imu_test_root)/run-5"
+  setup_fixture_recover_env "$root"
+
+  local live_dir="$IMU_TEST_HOME/Library/Messages"
+
+  local before_db before_wal
+  before_db=$(shasum -a 256 "$live_dir/chat.db" | awk '{print $1}')
+  before_wal=$(shasum -a 256 "$live_dir/chat.db-wal" | awk '{print $1}')
+
+  run python3 "$REPO_DIR/scripts/edit-history.py" \
+    --db "$live_dir/chat.db" \
+    --since all \
+    --json
+
+  [ "$status" -eq 0 ]
+
+  local after_db after_wal
+  after_db=$(shasum -a 256 "$live_dir/chat.db" | awk '{print $1}')
+  after_wal=$(shasum -a 256 "$live_dir/chat.db-wal" | awk '{print $1}')
+
+  [ "$before_db" = "$after_db" ]
+  [ "$before_wal" = "$after_wal" ]
 }

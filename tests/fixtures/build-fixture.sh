@@ -195,6 +195,7 @@ writer.executescript(
       date_retracted INTEGER,
       is_empty INTEGER,
       is_from_me INTEGER,
+      is_read INTEGER,
       is_delivered INTEGER,
       message_summary_info BLOB,
       payload_data BLOB,
@@ -219,8 +220,8 @@ for idx in range(3):
         INSERT INTO message
           (ROWID, guid, text, attributedBody, service, account, handle_id, date,
            date_read, date_delivered, date_edited, date_retracted, is_empty,
-           is_from_me, is_delivered, message_summary_info)
-        VALUES (?, ?, ?, ?, 'iMessage', 'fixture@example.com', 1, ?, 0, 0, 0, 0, 0, 0, 1, NULL)
+           is_from_me, is_read, is_delivered, message_summary_info)
+        VALUES (?, ?, ?, ?, 'iMessage', 'fixture@example.com', 1, ?, 0, 0, 0, 0, 0, 0, 0, 1, NULL)
         """,
         (rowid, f"fixture-normal-{idx}", f"normal fixture message {idx}", b"\x04\x0bstreamtyped", base_date + idx),
     )
@@ -237,8 +238,8 @@ writer.execute(
     INSERT INTO message
       (ROWID, guid, text, attributedBody, service, account, handle_id, date,
        date_read, date_delivered, date_edited, date_retracted, is_empty,
-       is_from_me, is_delivered, message_summary_info)
-    VALUES (?, ?, ?, ?, 'iMessage', 'fixture@example.com', 1, ?, 0, 0, 0, 0, 0, 0, 1, NULL)
+       is_from_me, is_read, is_delivered, message_summary_info)
+    VALUES (?, ?, ?, ?, 'iMessage', 'fixture@example.com', 1, ?, 0, 0, 0, 0, 0, 0, 0, 1, NULL)
     """,
     (target_rowid, guid, fixture_text, b"\x04\x0bstreamtyped", sent_at),
 )
@@ -302,8 +303,8 @@ writer.execute(
     INSERT INTO message
       (ROWID, guid, text, attributedBody, service, account, handle_id, date,
        date_read, date_delivered, date_edited, date_retracted, is_empty,
-       is_from_me, is_delivered, message_summary_info)
-    VALUES (?, ?, ?, ?, 'iMessage', 'fixture@example.com', 1, ?, 0, 0, ?, 0, 0, 0, 1, ?)
+       is_from_me, is_read, is_delivered, message_summary_info)
+    VALUES (?, ?, ?, ?, 'iMessage', 'fixture@example.com', 1, ?, 0, 0, ?, 0, 0, 0, 0, 1, ?)
     """,
     (
         edit_rowid,
@@ -319,6 +320,68 @@ writer.execute(
     "INSERT INTO chat_message_join (chat_id, message_id, message_date) VALUES (1, ?, ?)",
     (edit_rowid, edit_sent_at),
 )
+writer.commit()
+
+# --- Vector 8 (read receipts) rows -------------------------------------------
+# Five rows covering every receipt state the classifier has to distinguish.
+# `is_read`/`date_read` disagree on purpose: `flagged_only` (flag set, no
+# timestamp) is the state Messages.app cannot express and the reason this
+# vector exists. See docs/recovery-vectors.md.
+receipt_base = base_date + 200
+# ROWID 402 deliberately carries handle_id = 0: Messages leaves it unset on
+# roughly half of all outgoing rows, so the counterparty has to be resolved
+# through chat_message_join instead. A handle filter that misses this row
+# would drop most outgoing traffic on a real chat.db.
+receipt_rows = [
+    # (rowid, guid-suffix, text, offset_s, service, is_from_me, handle_id,
+    #  date_read_offset_s, is_read, date_delivered_offset_s, is_delivered)
+    (400, "400", "receipt fixture: outgoing, read with timestamp",
+     0, "iMessage", 1, 1, 65, 1, 2, 1),
+    (401, "401", "receipt fixture: outgoing, read flag but no timestamp",
+     10, "iMessage", 1, 1, None, 1, None, 1),
+    (402, "402", "receipt fixture: outgoing, delivered but never read",
+     20, "iMessage", 1, 0, None, 0, 3, 1),
+    (403, "403", "receipt fixture: outgoing SMS, receipts unsupported",
+     30, "SMS", 1, 1, None, 0, None, 0),
+    (404, "404", "receipt fixture: incoming, read by me with timestamp",
+     40, "iMessage", 0, 1, 12, 1, 1, 1),
+]
+for (
+    r_rowid, r_suffix, r_text, r_offset, r_service, r_from_me, r_handle_id,
+    r_read_off, r_is_read, r_delivered_off, r_is_delivered,
+) in receipt_rows:
+    r_sent = receipt_base + r_offset * 1_000_000_000
+    r_read = r_sent + r_read_off * 1_000_000_000 if r_read_off is not None else 0
+    r_delivered = (
+        r_sent + r_delivered_off * 1_000_000_000 if r_delivered_off is not None else 0
+    )
+    writer.execute(
+        """
+        INSERT INTO message
+          (ROWID, guid, text, attributedBody, service, account, handle_id, date,
+           date_read, date_delivered, date_edited, date_retracted, is_empty,
+           is_from_me, is_read, is_delivered, message_summary_info)
+        VALUES (?, ?, ?, ?, ?, 'fixture@example.com', ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, NULL)
+        """,
+        (
+            r_rowid,
+            f"00000000-0000-0000-0000-000000000{r_suffix}",
+            r_text,
+            build_attributedstring_typedstream(r_text),
+            r_service,
+            r_handle_id,
+            r_sent,
+            r_read,
+            r_delivered,
+            r_from_me,
+            r_is_read,
+            r_is_delivered,
+        ),
+    )
+    writer.execute(
+        "INSERT INTO chat_message_join (chat_id, message_id, message_date) VALUES (1, ?, ?)",
+        (r_rowid, r_sent),
+    )
 writer.commit()
 
 build_iphone_backup_fixture(out_dir, handle, guid, fixture_text, sent_at)
