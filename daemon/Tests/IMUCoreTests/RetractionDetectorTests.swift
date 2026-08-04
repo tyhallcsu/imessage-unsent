@@ -3,6 +3,11 @@ import XCTest
 @testable import IMUCore
 
 final class RetractionDetectorTests: XCTestCase {
+  /// See the note in the #160 fix: pinning the clock to the Apple epoch makes the
+  /// seeded high-water mark 0, preserving the detection semantics these tests
+  /// were written for. `FirstRunSeedingTests` covers the seeding itself.
+  private let detectorTestNow: () -> Date = { Date(timeIntervalSince1970: 978_307_200) }
+
   func testStateStorePersistsLastSeenDateEdited() throws {
     let directory = try makeTemporaryDirectory()
     defer {
@@ -86,7 +91,8 @@ final class RetractionDetectorTests: XCTestCase {
     XCTAssertNoThrow(
       try RetractionDetector(
         chatDBURL: fixture.chatDBURL,
-        stateStore: DetectorStateStore(url: fixture.stateURL)
+        stateStore: DetectorStateStore(url: fixture.stateURL),
+        now: detectorTestNow
       )
     )
   }
@@ -106,7 +112,8 @@ final class RetractionDetectorTests: XCTestCase {
 
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
-      stateStore: DetectorStateStore(url: fixture.stateURL)
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      now: detectorTestNow
     )
     let events = try detector.detect()
 
@@ -139,7 +146,8 @@ final class RetractionDetectorTests: XCTestCase {
 
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
-      stateStore: DetectorStateStore(url: fixture.stateURL)
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      now: detectorTestNow
     )
     let events = try detector.detect()
 
@@ -163,7 +171,8 @@ final class RetractionDetectorTests: XCTestCase {
 
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
-      stateStore: DetectorStateStore(url: fixture.stateURL)
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      now: detectorTestNow
     )
     let firstPass = try detector.detect()
     XCTAssertEqual(firstPass.count, 1)
@@ -192,7 +201,8 @@ final class RetractionDetectorTests: XCTestCase {
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
       stateStore: DetectorStateStore(url: fixture.stateURL),
-      maxAttempts: 3
+      maxAttempts: 3,
+      now: detectorTestNow
     )
     XCTAssertEqual(try detector.detect().count, 1)
 
@@ -221,7 +231,8 @@ final class RetractionDetectorTests: XCTestCase {
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
       stateStore: DetectorStateStore(url: fixture.stateURL),
-      maxAttempts: 3
+      maxAttempts: 3,
+      now: detectorTestNow
     )
 
     try detector.markFailed(guid: "synthetic-guid-doomed")
@@ -250,7 +261,8 @@ final class RetractionDetectorTests: XCTestCase {
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
       stateStore: DetectorStateStore(url: fixture.stateURL),
-      maxAttempts: 3
+      maxAttempts: 3,
+      now: detectorTestNow
     )
 
     try detector.markFailed(guid: "synthetic-guid-late-success")
@@ -272,7 +284,8 @@ final class RetractionDetectorTests: XCTestCase {
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
       stateStore: DetectorStateStore(url: fixture.stateURL),
-      maxProcessedGUIDs: 4
+      maxProcessedGUIDs: 4,
+      now: detectorTestNow
     )
 
     for guid in ["guid-005", "guid-001", "guid-003", "guid-002"] {
@@ -299,7 +312,8 @@ final class RetractionDetectorTests: XCTestCase {
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
       stateStore: DetectorStateStore(url: fixture.stateURL),
-      maxProcessedGUIDs: cap
+      maxProcessedGUIDs: cap,
+      now: detectorTestNow
     )
 
     for index in 0..<500 {
@@ -322,7 +336,8 @@ final class RetractionDetectorTests: XCTestCase {
       chatDBURL: fixture.chatDBURL,
       stateStore: DetectorStateStore(url: fixture.stateURL),
       maxAttempts: 100,
-      maxAttemptCounts: 3
+      maxAttemptCounts: 3,
+      now: detectorTestNow
     )
 
     try detector.markFailed(guid: "guid-c")
@@ -363,7 +378,8 @@ final class RetractionDetectorTests: XCTestCase {
 
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
-      stateStore: DetectorStateStore(url: fixture.stateURL)
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      now: detectorTestNow
     )
     let callbackFired = expectation(description: "detector fires after WAL write")
     let lock = NSLock()
@@ -432,7 +448,8 @@ final class RetractionDetectorTests: XCTestCase {
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
       stateStore: DetectorStateStore(url: fixture.stateURL),
-      maxAttempts: 3
+      maxAttempts: 3,
+      now: detectorTestNow
     )
 
     let events = try detector.detect()
@@ -468,7 +485,8 @@ final class RetractionDetectorTests: XCTestCase {
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
       stateStore: DetectorStateStore(url: fixture.stateURL),
-      maxAttempts: 3
+      maxAttempts: 3,
+      now: detectorTestNow
     )
 
     let events = try detector.detect()
@@ -503,7 +521,8 @@ final class RetractionDetectorTests: XCTestCase {
 
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
-      stateStore: DetectorStateStore(url: fixture.stateURL)
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      now: detectorTestNow
     )
 
     let events = try detector.detect()
@@ -536,7 +555,8 @@ final class RetractionDetectorTests: XCTestCase {
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
       stateStore: DetectorStateStore(url: fixture.stateURL),
-      maxAttempts: 3
+      maxAttempts: 3,
+      now: detectorTestNow
     )
 
     let events = try detector.detect()

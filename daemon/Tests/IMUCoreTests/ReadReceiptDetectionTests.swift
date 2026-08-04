@@ -9,6 +9,11 @@ import XCTest
 /// SELECT naming columns a database lacks would fail every prepare and end
 /// detection silently, trading the core feature for a nice-to-have.
 final class ReadReceiptDetectionTests: XCTestCase {
+  /// Pin the clock to the Apple epoch so the #160 first-run grace window seeds to 0.
+  /// These fixtures use Apple-epoch timestamps (797_000_010_000_000_000 == 2026-04-04);
+  /// with a real clock they'd fall outside the 5-minute window and never be detected.
+  private let detectorTestNow: () -> Date = { Date(timeIntervalSince1970: 978_307_200) }
+
   func testDetectorCapturesReceiptStateFromModernSchema() throws {
     let fixture = try makeFixture(includeReceiptColumns: true)
     defer { try? FileManager.default.removeItem(at: fixture.directory) }
@@ -22,7 +27,8 @@ final class ReadReceiptDetectionTests: XCTestCase {
 
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
-      stateStore: DetectorStateStore(url: fixture.stateURL)
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      now: detectorTestNow
     )
     let events = try detector.detect()
 
@@ -47,7 +53,8 @@ final class ReadReceiptDetectionTests: XCTestCase {
 
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
-      stateStore: DetectorStateStore(url: fixture.stateURL)
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      now: detectorTestNow
     )
     let context = try XCTUnwrap(try detector.detect().first?.readContext)
 
@@ -69,7 +76,8 @@ final class ReadReceiptDetectionTests: XCTestCase {
 
     let detector = try RetractionDetector(
       chatDBURL: fixture.chatDBURL,
-      stateStore: DetectorStateStore(url: fixture.stateURL)
+      stateStore: DetectorStateStore(url: fixture.stateURL),
+      now: detectorTestNow
     )
     let events = try detector.detect()
 

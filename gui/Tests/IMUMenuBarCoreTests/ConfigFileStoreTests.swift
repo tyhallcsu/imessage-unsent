@@ -161,3 +161,45 @@ extension ConfigFileStoreTests {
     XCTAssertEqual(parsed.notifications.webhook, "https://example.com/a#b")
   }
 }
+
+extension ConfigFileStoreTests {
+  /// Issue #160 — `serialize` rewrites the whole file, so any daemon key the GUI
+  /// does not model is deleted on the next Settings save. A user who followed the
+  /// README to enable a one-off backfill and then toggled an unrelated setting
+  /// would have had the escape hatch silently reset to the default.
+  func testMonitoringGraceSecondsSurvivesAGUIRoundTrip() {
+    let toml = """
+    log_level = "info"
+    data_dir = "~/Library/Application Support/imessage-unsent"
+    archive_retention = 10
+    monitoring_grace_seconds = 4000000000
+
+    [notifications]
+    show = true
+    """
+
+    let parsed = ConfigFileStore.parse(toml)
+    XCTAssertEqual(parsed.monitoringGraceSeconds, 4_000_000_000)
+
+    // Save an unrelated change, exactly as the Settings pane would.
+    var edited = parsed
+    edited.notifications.show = false
+    let rewritten = ConfigFileStore.serialize(edited)
+
+    XCTAssertTrue(
+      rewritten.contains("monitoring_grace_seconds = 4000000000"),
+      "a GUI save must not drop the daemon's backfill setting"
+    )
+    XCTAssertEqual(ConfigFileStore.parse(rewritten).monitoringGraceSeconds, 4_000_000_000)
+    XCTAssertFalse(ConfigFileStore.parse(rewritten).notifications.show)
+  }
+
+  func testMonitoringGraceSecondsDefaultsAndRejectsNegatives() {
+    XCTAssertEqual(ConfigFileStore.parse("log_level = \"info\"").monitoringGraceSeconds, 300)
+    XCTAssertEqual(
+      ConfigFileStore.parse("monitoring_grace_seconds = -5").monitoringGraceSeconds,
+      300,
+      "a negative window is meaningless and must not override the default"
+    )
+  }
+}

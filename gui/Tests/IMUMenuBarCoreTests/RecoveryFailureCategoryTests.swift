@@ -34,3 +34,24 @@ final class RecoveryFailureCategoryTests: XCTestCase {
     XCTAssertNil(RecoveryFailureCategory.unknown.actionableHint)
   }
 }
+
+extension RecoveryFailureCategoryTests {
+  /// Issue #160 — the GUI mirror must carry `predates_monitoring` with the exact
+  /// raw value the daemon writes, or the manifest decodes as `.unknown` and the
+  /// user is told "cause not determined" for a case we understand perfectly well.
+  /// The daemon-side assertion lives in IMUCoreTests; neither package can import
+  /// the other, so the contract needs a test on both sides.
+  func testPredatesMonitoringMirrorsTheDaemonRawValue() {
+    XCTAssertEqual(RecoveryFailureCategory.predatesMonitoring.rawValue, "predates_monitoring")
+    XCTAssertEqual(
+      RecoveryFailureCategory(rawValue: "predates_monitoring"),
+      .predatesMonitoring
+    )
+    XCTAssertTrue(RecoveryFailureCategory.allCases.contains(.predatesMonitoring))
+    XCTAssertNotEqual(
+      RecoveryFailureCategory.predatesMonitoring.displayMessage,
+      RecoveryFailureCategory.walCheckpointed.displayMessage
+    )
+    XCTAssertNotNil(RecoveryFailureCategory.predatesMonitoring.actionableHint)
+  }
+}

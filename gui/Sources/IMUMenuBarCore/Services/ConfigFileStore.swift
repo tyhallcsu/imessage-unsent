@@ -101,6 +101,10 @@ public final class ConfigFileStore: ConfigFileStoring {
           if let intValue = Int(parseString(value)) {
             config.archiveRetention = intValue
           }
+        case "monitoring_grace_seconds":
+          if let intValue = Int(parseString(value)), intValue >= 0 {
+            config.monitoringGraceSeconds = intValue
+          }
         default:
           continue
         }
@@ -142,6 +146,7 @@ public final class ConfigFileStore: ConfigFileStoring {
     lines.append("log_level = \(quote(config.logLevel))")
     lines.append("data_dir = \(quote(config.dataDir))")
     lines.append("archive_retention = \(config.archiveRetention)")
+    lines.append("monitoring_grace_seconds = \(config.monitoringGraceSeconds)")
     lines.append("")
     lines.append("[notifications]")
     lines.append("show = \(config.notifications.show)")

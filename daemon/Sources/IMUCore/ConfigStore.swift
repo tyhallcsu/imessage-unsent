@@ -4,6 +4,15 @@ public struct DaemonConfig: Equatable {
   public var logLevel: String
   public var dataDir: String
   public var archiveRetention: Int
+  /// How far back a FRESH install looks for retractions, in seconds. Default 300
+  /// (see `RetractionDetector.defaultMonitoringGraceWindow`).
+  ///
+  /// `0` means "only retractions from this moment on". A value larger than the
+  /// age of the database restores the pre-#160 behaviour of scanning all history
+  /// — available deliberately for anyone who wants a one-off backfill, but never
+  /// the default: on a real 412k-message database that produced 243 archives in
+  /// 111 seconds and recovered nothing. Ignored once a state file exists.
+  public var monitoringGraceSeconds: Int
   public var notifications: NotificationConfig
   public var experimental: ExperimentalConfig
 
@@ -11,12 +20,14 @@ public struct DaemonConfig: Equatable {
     logLevel: String = "info",
     dataDir: String = "~/Library/Application Support/imessage-unsent",
     archiveRetention: Int = 100,
+    monitoringGraceSeconds: Int = 300,
     notifications: NotificationConfig = NotificationConfig(),
     experimental: ExperimentalConfig = ExperimentalConfig()
   ) {
     self.logLevel = logLevel
     self.dataDir = dataDir
     self.archiveRetention = archiveRetention
+    self.monitoringGraceSeconds = monitoringGraceSeconds
     self.notifications = notifications
     self.experimental = experimental
   }
@@ -110,6 +121,7 @@ public struct ConfigStore {
     lines.append("log_level = \(quote(config.logLevel))")
     lines.append("data_dir = \(quote(config.dataDir))")
     lines.append("archive_retention = \(config.archiveRetention)")
+    lines.append("monitoring_grace_seconds = \(config.monitoringGraceSeconds)")
     lines.append("")
     lines.append("[notifications]")
     lines.append("show = \(config.notifications.show)")
@@ -215,6 +227,10 @@ public struct ConfigStore {
         config.logLevel = parseString(parts[1])
       case "data_dir":
         config.dataDir = parseString(parts[1])
+      case "monitoring_grace_seconds":
+        if let value = Int(parseString(parts[1])), value >= 0 {
+          config.monitoringGraceSeconds = value
+        }
       case "archive_retention":
         if let value = Int(parseString(parts[1])) {
           config.archiveRetention = value

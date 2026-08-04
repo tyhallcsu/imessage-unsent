@@ -212,10 +212,44 @@ public struct ArchivePipeline {
       } else {
         outputData = result.stdout
       }
-      try? outputData.write(to: recoveryURL, options: .atomic)
-
       let recovered = recoveryJSONHasText(outputData)
-      let failureCategory = recovered ? nil : recoveryJSONFailureCategory(outputData)
+      var failureCategory = recovered ? nil : recoveryJSONFailureCategory(outputData)
+      // For a retraction preceding this fresh-state launch's monitoring start we
+      // know we were not tracking it, so "wal_checkpointed" is the wrong story.
+      // Outside that case we cannot tell — the daemon may have been down — so
+      // wal_checkpointed stays as the honest default rather than being widened. Reclassify ONLY that and the no-diagnosis case: every other category
+      // is a specific finding that survives on its own merits — `script_error` is a
+      // real defect, `not_in_local_wal` means the retract never reached this device
+      // at all (typical of a remote group-chat retraction), `unknown_handle` and
+      // `attachment_only` are likewise independent of when we started watching
+      // (issue #160).
+      // Gate on the RAW string, not the mapped enum: an unrecognized category
+      // from a newer recover.sh also maps to `.unknown`, and silently converting
+      // a future diagnosis into "predates monitoring" would erase information we
+      // simply don't understand yet.
+      let rawCategory = recoveryJSONRawFailureCategory(outputData)
+      var didReclassify = false
+      if event.precedesMonitoring,
+         failureCategory != nil,
+         rawCategory == RecoveryFailureCategory.walCheckpointed.rawValue
+           || rawCategory == RecoveryFailureCategory.unknown.rawValue {
+        failureCategory = .predatesMonitoring
+        didReclassify = true
+      }
+
+      // Write recovery.json AFTER reclassifying, with the final category patched
+      // in. Every consumer — ArchiveHistoryReader, RecoveryNotifier (including the
+      // webhook payload) and the GUI's RecoveryDetailLoader — prefers
+      // recovery.json's category over the manifest's, so leaving the raw value
+      // here would have made predates_monitoring invisible everywhere the user
+      // actually looks (issue #160).
+      // Rewrite ONLY when we actually reclassified. Patching unconditionally would
+      // flatten an unrecognized raw value to the enum's `.unknown`, destroying a
+      // future recover.sh's diagnosis on its way through an older daemon.
+      let finalOutput = didReclassify
+        ? rewriteFailureCategory(in: outputData, to: .predatesMonitoring)
+        : outputData
+      try? finalOutput.write(to: recoveryURL, options: .atomic)
       return RecoveryRun(
         manifest: ArchiveRecovery(
           startedAt: isoString(startedAt),
@@ -443,6 +477,19 @@ private func recoveryJSONHasText(_ data: Data) -> Bool {
   return !text.isEmpty
 }
 
+/// The `failure_category` string exactly as recover.sh wrote it, before it is
+/// mapped onto the enum (which collapses anything unrecognized to `.unknown`).
+func recoveryJSONRawFailureCategory(_ data: Data) -> String? {
+  guard
+    let object = try? JSONSerialization.jsonObject(with: data),
+    let payload = object as? [String: Any],
+    let recovered = payload["recovered"] as? [String: Any]
+  else {
+    return nil
+  }
+  return recovered["failure_category"] as? String
+}
+
 func recoveryJSONFailureCategory(_ data: Data) -> RecoveryFailureCategory? {
   guard
     let object = try? JSONSerialization.jsonObject(with: data),
@@ -528,4 +575,23 @@ public func defaultRecoverScriptURL() -> URL {
   }
 
   return cwdCandidate
+}
+
+
+/// Replace `recovered.failure_category` in a recover.sh JSON payload, preserving
+/// every other field. Returns the input unchanged if it isn't the shape we expect —
+/// a malformed payload is the recovery script's problem to report, not ours to mangle.
+private func rewriteFailureCategory(in data: Data, to category: RecoveryFailureCategory) -> Data {
+  guard var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+    return data
+  }
+  var recovered = (object["recovered"] as? [String: Any]) ?? [:]
+  recovered["failure_category"] = category.rawValue
+  object["recovered"] = recovered
+  guard let rewritten = try? JSONSerialization.data(
+    withJSONObject: object, options: [.prettyPrinted, .sortedKeys]
+  ) else {
+    return data
+  }
+  return rewritten
 }

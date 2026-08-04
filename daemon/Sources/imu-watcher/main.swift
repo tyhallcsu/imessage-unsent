@@ -26,6 +26,8 @@ final class WatcherDaemon {
   private var archivePipeline: ArchivePipeline?
   private var notifier: RecoveryNotifier?
   private var controlServer: ControlServer?
+  /// From config (`monitoring_grace_seconds`); how far back a fresh install looks (#160).
+  private var monitoringGraceWindow: TimeInterval = RetractionDetector.defaultMonitoringGraceWindow
   private var lastWalSize: Int64 = 0
   private var stopped = false
   // Detection + archiving run here, NOT on the FSWatcher queue (#143): a
@@ -47,6 +49,7 @@ final class WatcherDaemon {
 
     let configURL = defaultConfigURL()
     let config = try ConfigStore(url: configURL).load()
+    monitoringGraceWindow = TimeInterval(config.monitoringGraceSeconds)
     let dataDir = expandTilde(config.dataDir)
     try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dataDir.path)
@@ -161,7 +164,8 @@ final class WatcherDaemon {
     // into the daemon log so a reset is visible rather than silent.
     detector = try RetractionDetector(
       chatDBURL: chatDBURL,
-      stateStore: DetectorStateStore(logger: { [weak self] in self?.log($0) })
+      stateStore: DetectorStateStore(logger: { [weak self] in self?.log($0) }),
+      monitoringGraceWindow: monitoringGraceWindow
     )
     lastWalSize = FSWatcher.fileSize(at: walURL)
     let watcher = FSWatcher(walURL: walURL) { [weak self] size in
@@ -171,13 +175,49 @@ final class WatcherDaemon {
     try watcher.start()
     walWatcher = watcher
     log("watching wal path=\(walURL.path) initial_size=\(lastWalSize)")
+
+    // FSWatcher records the current WAL signature on start() so the first poll
+    // does not fire on pre-existing state, and detection otherwise only runs from
+    // handleWalChange. Without this pass, a retraction that happened inside the
+    // grace window — the exact case the window exists for, someone installing
+    // right after seeing a message vanish — would wait for an unrelated WAL write
+    // while its recoverable frame ages out. Run one detection now (#160).
+    if let detector, let archivePipeline {
+      let walSnapshotter = self.walSnapshotter
+      let notifier = self.notifier
+      // Snapshot BEFORE detecting, same order as handleWalChange, so the buffer
+      // holds the WAL as it was at startup rather than after any intervening
+      // checkpoint.
+      //
+      // Caveat worth knowing: the buffer does not currently reach recover.sh at
+      // all — it is copied into the archive AFTER archive() has already run the
+      // script (#169). So this preserves the frames for a later attempt (manual
+      // recover.sh against the archive, or the iPhone-backup retry), not for the
+      // immediate run. Once #169 lands, this ordering is what makes the buffer
+      // useful to the grace-window event.
+      do {
+        _ = try walSnapshotter?.snapshot()
+      } catch {
+        log("startup wal snapshot error=\(error.localizedDescription)")
+      }
+      log("startup detection pass (grace window)")
+      pipelineQueue.async { [weak self] in
+        self?.runDetectionPipeline(
+          detector: detector,
+          archivePipeline: archivePipeline,
+          walSnapshotter: walSnapshotter,
+          notifier: notifier
+        )
+      }
+    }
   }
 
   private func handleWalChange(size: Int64) {
     // Snapshot the WAL into the rolling buffer FIRST, before any SQL work
-    // that might race against iMessage's auto-checkpoint (#67). The buffer
-    // is what the recovery script falls back to when the live WAL no longer
-    // contains the pre-retract page image.
+    // that might race against iMessage's auto-checkpoint (#67). The buffer is
+    // intended as recovery's fallback when the live WAL no longer contains the
+    // pre-retract page — though see #169: it is copied into the archive after
+    // recover.sh has already run, so today it only serves later attempts.
     do {
       _ = try walSnapshotter?.snapshot()
     } catch {
@@ -228,8 +268,12 @@ final class WatcherDaemon {
         )
         do {
           let complete = try archivePipeline.archive(event: event)
-          // Copy the rolling WAL buffer into the archive's wal-history/ so
-          // the recovery script can scan older WAL frames too (#67).
+          // Copy the rolling WAL buffer into the archive's wal-history/ (#67).
+          // NOTE (#169): this runs AFTER archive() has already invoked
+          // recover.sh, so the script's wal-history scan never sees it. The
+          // copy is still worth doing — a manual recover.sh against the archive
+          // or an iPhone-backup retry can use it — but it does not help the run
+          // above, which is the ordering defect #169 fixes.
           let walHistoryDest = complete.archiveDir.appendingPathComponent(
             "wal-history",
             isDirectory: true

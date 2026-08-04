@@ -306,8 +306,23 @@ The cases this tool will reliably miss:
 - **Empty `attributedBody` after retraction.** iMessage clears both `text` and `attributedBody` on retract. If the WAL no longer contains the pre-retract page, the attributedBody vector fails too.
 - **Group chats where another member retracts.** The retract event may not flush new attributedBody / text bytes to the WAL on your device at all if the message was already considered delivered; the row update is small.
 - **Attachments.** This tool recovers text only. Image / file unsends are out of scope.
+- **Anything that was unsent before you installed the daemon.** The daemon starts watching from **5 minutes before its first launch** and does not import history. This is deliberate: the WAL pages behind older retractions have almost always been checkpointed away, so a backfill is overwhelmingly likely to recover nothing while costing a full `chat.db` clone per event. On one real 412k-message database an unbounded first run produced **243 archives in 111 seconds**, each cloning a ~900 MB `chat.db`, and recovered **0 of 243** ([#160](https://github.com/tyhallcsu/imessage-unsent/issues/160)). Five minutes is a policy bound rather than a hard limit — the live WAL can still hold older frames — which is why the window is configurable.
 
-The daemon mitigates the WAL-checkpoint race by maintaining a **rolling snapshot buffer** at `~/Library/Application Support/imessage-unsent/wal-history/` — every change to `chat.db-wal` is copied into the buffer (capped at 30 snapshots / 5 minutes by default), so the recovery script can also scan WAL frames that the live file no longer contains. This dramatically improves the recovery rate for slow-unsend cases but cannot help if the daemon wasn't running, didn't have Full Disk Access, or wasn't installed at the time the message was originally written.
+  The *fact* that those older retractions happened is not lost — the rows are still in `chat.db` and queryable at any time. Their text is very unlikely to still be reachable, but that is a matter of odds rather than a guarantee, which is why the window is adjustable rather than fixed. If you want a one-off backfill anyway, set `monitoring_grace_seconds` in `~/.config/imessage-unsent/config.toml` to something larger than the age of your database (it must be a top-level key, above any `[section]` header). `0` means "from this moment on"; the default is `300`.
+
+> [!IMPORTANT]
+> The setting is only consulted when the daemon starts from a **fresh state** — a first launch, or the first start after `~/.config/imessage-unsent/state.json` is removed or quarantined. Config and state are both read once at startup, so editing either under a running daemon does nothing (and the running process can rewrite `state.json` from memory afterwards). The sequence that actually works:
+>
+> ```bash
+> launchctl bootout gui/$(id -u)/com.imu.watcher
+> # edit ~/.config/imessage-unsent/config.toml  (top-level monitoring_grace_seconds)
+> rm ~/.config/imessage-unsent/state.json
+> launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.imu.watcher.plist
+> ```
+>
+> Re-reading the config on every launch is deliberate rather than on every change: silently re-scanning history because a value moved is how #160 produced 243 archives nobody asked for.
+
+The daemon maintains a **rolling snapshot buffer** at `~/Library/Application Support/imessage-unsent/wal-history/` — every change to `chat.db-wal` is copied into the buffer (capped at 30 snapshots / 5 minutes by default). **It does not currently feed daemon-driven recovery** ([#169](https://github.com/tyhallcsu/imessage-unsent/issues/169)): the buffer is copied into an archive only *after* `recover.sh` has already run, so the script never sees it. The snapshots are captured and retained correctly, so they are usable today for a manual `recover.sh` run against an archive or an iPhone-backup retry. Once #169 lands, the buffer will let the recovery script also scan WAL frames the live file no longer contains, which is expected to improve the recovery rate for slow-unsend cases — but it will still not help if the daemon wasn't running, lacked Full Disk Access, or wasn't installed when the message was written.
 
 The buffer is implemented in [`daemon/Sources/IMUCore/WALSnapshotter.swift`](daemon/Sources/IMUCore/WALSnapshotter.swift) and merged into the recovery flow by [`scripts/lib/wal_merge_candidates.py`](scripts/lib/wal_merge_candidates.py). Full deep-dive in [`docs/recovery-vectors.md` § Vector 4 § The WAL rolling snapshot buffer](docs/recovery-vectors.md#the-wal-rolling-snapshot-buffer-issue-67), including what the buffer can and can't fix and operational notes on its disk cost.
 

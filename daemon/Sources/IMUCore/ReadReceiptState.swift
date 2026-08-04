@@ -92,3 +92,11 @@ public struct RetractionReadContext: Codable, Equatable, Sendable {
     case readToRetractSeconds = "read_to_retract_seconds"
   }
 }
+
+/// Seconds between the UNIX epoch and Apple's 2001-01-01 epoch.
+private let appleEpochOffset: TimeInterval = 978_307_200
+
+/// `Date` → Apple-epoch nanoseconds, the unit every `message` timestamp column uses.
+public func appleEpochNanoseconds(from date: Date) -> Int64 {
+  Int64((date.timeIntervalSince1970 - appleEpochOffset) * 1_000_000_000)
+}

@@ -1,9 +1,15 @@
 import Foundation
 
 /// Issue #67. Captures `chat.db-wal` to a rolling on-disk buffer every time
-/// it changes, so when a retraction is detected the daemon can scan a window
-/// of pre-retract WAL states — not just the live WAL, which may have been
+/// it changes, so a retraction can be investigated against a window of
+/// pre-retract WAL states — not just the live WAL, which may have been
 /// checkpointed away by SQLite before we get a chance to copy it.
+///
+/// NOTE (#169): the buffer does not currently reach the daemon's own recovery
+/// run. `ArchivePipeline.archive()` invokes `recover.sh` before the buffer is
+/// copied into the archive, so the script's `wal-history/` scan is skipped.
+/// Snapshots are still captured and retained, and remain usable for a manual
+/// `recover.sh` against the archive or an iPhone-backup retry.
 ///
 /// Snapshots live at `<storeDir>/<UTC-iso-timestamp>-<size>.db-wal`. Retention
 /// is bounded by both a count cap (default 30) and a max age (default 5 min).

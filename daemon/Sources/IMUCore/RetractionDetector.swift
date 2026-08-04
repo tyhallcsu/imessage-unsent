@@ -11,18 +11,32 @@ public struct RetractionDetected: Equatable {
   /// columns. `nil` means "we don't know", never "it wasn't read".
   public let readContext: RetractionReadContext?
 
+  /// True only when this launch started from fresh state AND the retraction predates
+  /// `monitoringStartedAt` — the launch instant, which is a grace window LATER than
+  /// the seeded high-water mark. After an ordinary restart with valid state, an
+  /// older event is a genuine catch-up miss and keeps its real failure category.
+  ///
+  /// It says nothing about whether monitoring was active earlier — a quarantined
+  /// corrupt state re-establishes the starting point for an installation that had
+  /// been running for months. Recovery is still attempted (the page may still be in
+  /// the live WAL); a failure just means the miss is explained by when this launch
+  /// began monitoring, not by losing a race we were running (issue #160).
+  public let precedesMonitoring: Bool
+
   public init(
     rowid: Int64,
     guid: String,
     handle: String,
     editedAt: Int64,
-    readContext: RetractionReadContext? = nil
+    readContext: RetractionReadContext? = nil,
+    precedesMonitoring: Bool = false
   ) {
     self.rowid = rowid
     self.guid = guid
     self.handle = handle
     self.editedAt = editedAt
     self.readContext = readContext
+    self.precedesMonitoring = precedesMonitoring
   }
 }
 
@@ -55,6 +69,22 @@ public struct DetectorState: Codable, Equatable {
   }
 }
 
+/// Where a loaded `DetectorState` came from. `missing` and `corrupt` both yield a
+/// zeroed state, and a zeroed high-water mark means "every retraction ever recorded"
+/// — so both must be seeded, not just the missing-file case (issue #160).
+public enum DetectorStateOrigin: String, Equatable, Sendable {
+  case existing
+  case missing
+  case corrupt
+}
+
+public struct LoadedDetectorState: Equatable {
+  public let state: DetectorState
+  public let origin: DetectorStateOrigin
+
+  public var isFresh: Bool { origin != .existing }
+}
+
 public struct DetectorStateStore {
   public let url: URL
   private let logger: ((String) -> Void)?
@@ -83,16 +113,23 @@ public struct DetectorStateStore {
   /// the acceptable cost; archive-dir naming keeps any re-archived events
   /// distinguishable.
   public func load() throws -> DetectorState {
+    try loadWithOrigin().state
+  }
+
+  public func loadWithOrigin() throws -> LoadedDetectorState {
     guard FileManager.default.fileExists(atPath: url.path) else {
-      return DetectorState()
+      return LoadedDetectorState(state: DetectorState(), origin: .missing)
     }
 
     let data = try Data(contentsOf: url)
     do {
-      return try JSONDecoder().decode(DetectorState.self, from: data)
+      return LoadedDetectorState(
+        state: try JSONDecoder().decode(DetectorState.self, from: data),
+        origin: .existing
+      )
     } catch {
       quarantineCorruptState(decodeError: error)
-      return DetectorState()
+      return LoadedDetectorState(state: DetectorState(), origin: .corrupt)
     }
   }
 
@@ -155,6 +192,24 @@ public enum RetractionDetectorError: Error, LocalizedError {
 }
 
 public final class RetractionDetector {
+  /// How far back a fresh install looks. A window larger than the database's age
+  /// seeds to 0, i.e. "every retraction ever recorded": on a real 412k-message
+  /// database that produced 243 archives in 111 seconds, each cloning a ~900 MB
+  /// chat.db, and recovered exactly nothing — their WAL pages had been
+  /// checkpointed away years earlier. A window of 0 is the opposite extreme:
+  /// "from this instant on" (issue #160).
+  ///
+  /// It is not zero either, because the realistic install sequence is "someone sees
+  /// a message get unsent, THEN installs this" — starting at exactly now would skip
+  /// the one event they installed for.
+  ///
+  /// Five minutes matches `WALSnapshotter`'s rolling-buffer window. That is a policy
+  /// bound, NOT a proof of unrecoverability: the live WAL can still hold frames older
+  /// than five minutes (it grows to ~4 MB before `wal_autocheckpoint` fires), so a
+  /// longer window would occasionally succeed. We pick the buffer window because it
+  /// is the span we control, and because the observed yield beyond it was 0 of 243.
+  public static let defaultMonitoringGraceWindow: TimeInterval = 300
+
   public static let defaultMaxAttempts = 3
   public static let defaultMaxProcessedGUIDs = 5_000
   public static let defaultMaxAttemptCounts = 1_000
@@ -166,19 +221,59 @@ public final class RetractionDetector {
   private let maxAttemptCounts: Int
   private var state: DetectorState
 
+  /// Apple-epoch ns at which this process began watching. Distinct from the seeded
+  /// high-water mark, which sits one grace window earlier — so an event can be after
+  /// the seed (hence detected) and still before this instant. Retractions older than
+  /// this were not being tracked by THIS launch, which is not the same as never
+  /// having been monitored: a state reset restarts monitoring for an installation
+  /// that was already running.
+  public let monitoringStartedAt: Int64
+
+  /// Whether this launch started from fresh state (missing, or corrupt+quarantined).
+  public let didSeedFreshState: Bool
+
   public init(
     chatDBURL: URL = defaultMessagesChatDBURL(),
     stateStore: DetectorStateStore = DetectorStateStore(),
     maxAttempts: Int = RetractionDetector.defaultMaxAttempts,
     maxProcessedGUIDs: Int = RetractionDetector.defaultMaxProcessedGUIDs,
-    maxAttemptCounts: Int = RetractionDetector.defaultMaxAttemptCounts
+    maxAttemptCounts: Int = RetractionDetector.defaultMaxAttemptCounts,
+    monitoringGraceWindow: TimeInterval = RetractionDetector.defaultMonitoringGraceWindow,
+    now: () -> Date = Date.init
   ) throws {
     self.chatDBURL = chatDBURL
     self.stateStore = stateStore
     self.maxAttempts = maxAttempts
     self.maxProcessedGUIDs = maxProcessedGUIDs
     self.maxAttemptCounts = maxAttemptCounts
-    self.state = try stateStore.load()
+
+    let startedAt = now()
+    self.monitoringStartedAt = appleEpochNanoseconds(from: startedAt)
+
+    let loaded = try stateStore.loadWithOrigin()
+    self.state = loaded.state
+    self.didSeedFreshState = loaded.isFresh
+
+    if loaded.isFresh {
+      // A zeroed high-water mark means "every retraction ever". Seed it, and
+      // persist BEFORE the first detect(): `markProcessed` returns early when
+      // there are no events, so a quiet first launch would otherwise never write
+      // state and every restart would re-baseline (issue #160).
+      // Clamped at 0: a grace window larger than the age of the database seeds
+      // to 0, which is the old "every retraction ever" behaviour. That makes the
+      // knob continuous — a bigger number looks further back, with no sentinel.
+      // Clamp before converting: `Int64(Double)` TRAPS on overflow, so an
+      // arbitrarily large `monitoring_grace_seconds` typo would crash the daemon
+      // on every launch — a launchd respawn loop, the #109 failure class. The
+      // useful maximum is the age of the Apple epoch itself; beyond that the seed
+      // is 0 ("all history") anyway.
+      let maxUsefulGrace = max(0, startedAt.timeIntervalSince1970 - 978_307_200)
+      let grace = min(max(0, monitoringGraceWindow), maxUsefulGrace)
+      self.state.lastSeenDateEdited = max(0, appleEpochNanoseconds(
+        from: startedAt.addingTimeInterval(-grace)
+      ))
+      try stateStore.save(self.state)
+    }
   }
 
   public func detect() throws -> [RetractionDetected] {
@@ -414,7 +509,8 @@ public final class RetractionDetector {
           guid: guid,
           handle: handle,
           editedAt: editedAt,
-          readContext: readContext
+          readContext: readContext,
+          precedesMonitoring: didSeedFreshState && editedAt < monitoringStartedAt
         )
       )
     }

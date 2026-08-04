@@ -37,7 +37,16 @@ final class DaemonBinaryE2ETests: XCTestCase {
     // Disable native macOS notifications — UNUserNotificationCenter throws
     // without an app bundle, which a CLI test process doesn't have.
     let configURL = fakeHome.appendingPathComponent(".config/imessage-unsent/config.toml", isDirectory: false)
-    try "[notifications]\nshow = false\n".write(to: configURL, atomically: true, encoding: .utf8)
+    // monitoring_grace_seconds = 4000000000 restores the pre-#160 "scan all history"
+    // behaviour. The fixture's retraction is dated 2026-04-04, so with the
+    // default 5-minute window this end-to-end run would correctly skip it.
+    // It doubles as the regression test for the opt-in backfill escape hatch
+    // actually being wired through config.
+    // NOTE: monitoring_grace_seconds is a TOP-LEVEL key, so it must precede the
+    // [notifications] header — inside the section the parser routes it to the
+    // notification handler and silently drops it.
+    try "monitoring_grace_seconds = 4000000000\n[notifications]\nshow = false\n"
+      .write(to: configURL, atomically: true, encoding: .utf8)
 
     try buildFixture(into: fakeHome.appendingPathComponent("Library/Messages", isDirectory: true))
   }
@@ -57,7 +66,7 @@ final class DaemonBinaryE2ETests: XCTestCase {
     fakeHome = nil
   }
 
-  func testDaemonExposesControlSocketAndArchivesRetractionAfterWalChange() throws {
+  func testDaemonArchivesAPreExistingRetractionViaTheStartupPass() throws {
     let binary = Self.packageRoot().appendingPathComponent(".build/debug/imu-watcher")
     try XCTSkipUnless(
       FileManager.default.fileExists(atPath: binary.path),
@@ -86,18 +95,22 @@ final class DaemonBinaryE2ETests: XCTestCase {
       fakeHome.appendingPathComponent("Library/Application Support/imessage-unsent").path
     )
 
+    // The startup pass must snapshot before detecting — the rolling buffer is
+    // preserved input for a later or manual recovery (and the prerequisite for #169) when the live WAL no longer holds the pre-retract page.
+    let walHistoryDir = fakeHome.appendingPathComponent(
+      "Library/Application Support/imessage-unsent/wal-history", isDirectory: true
+    )
+
     // Archives dir is empty until the daemon detects something.
     let archivesDir = fakeHome.appendingPathComponent(
       "Library/Application Support/imessage-unsent/archives",
       isDirectory: true
     )
 
-    // Trigger a WAL change so FSWatcher fires. The fixture already contains a
-    // retracted message (rowid 200) — first detect-after-start finds it. Use
-    // `touch` so FSEvents fires without rewriting the WAL frames that hold the
-    // pre-retraction text (any sqlite3 INSERT would close-checkpoint and lose
-    // them).
-    try touchWAL(at: fakeHome.appendingPathComponent("Library/Messages/chat.db-wal", isDirectory: false))
+    // Deliberately do NOT touch the WAL. FSWatcher records the file's signature on
+    // start() so the poll fallback cannot fire on pre-existing state, which means
+    // the startup detection pass (#160) is the ONLY path that can produce an
+    // archive here. Touching the WAL would race the two and prove neither.
 
     // Poll recent until the recovery lands and the daemon has written the
     // post-recovery manifest. Using the socket as the wait condition avoids
@@ -120,6 +133,25 @@ final class DaemonBinaryE2ETests: XCTestCase {
     XCTAssertEqual(entry["rowid"] as? Int, 200)
     XCTAssertEqual(entry["recovered"] as? Bool, true)
     XCTAssertEqual(entry["text"] as? String, "Recovered fixture message: hello WAL data!")
+
+    // The startup pass snapshots before it detects, and the buffer is copied into
+    // the archive. Assert against the ARCHIVE's copy, not the global buffer —
+    // checking the buffer alone would still pass if the copy regressed.
+    //
+    // This does NOT prove recovery used it: #169 shows the copy lands after
+    // recover.sh has already run, so the recovery above succeeded from the live
+    // WAL clone. What this guards is that the frames are captured and preserved,
+    // which is the precondition for #169's fix.
+    let archiveDir = archivesDir.appendingPathComponent(
+      try XCTUnwrap(archiveDirs.first), isDirectory: true
+    )
+    let archivedHistory = (try? FileManager.default.contentsOfDirectory(
+      atPath: archiveDir.appendingPathComponent("wal-history", isDirectory: true).path
+    )) ?? []
+    XCTAssertTrue(
+      archivedHistory.contains { $0.hasSuffix(".db-wal") },
+      "the archive's wal-history/ must hold the startup snapshot: found \(archivedHistory), log=\n\(captureLog())"
+    )
   }
 
   // MARK: - Helpers
