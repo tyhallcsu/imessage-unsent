@@ -112,8 +112,9 @@ So the metadata tells you "a 95-character user-sent text was retracted in full" 
 | `account`               | TEXT    | Account that received the message                    |
 | `handle_id`             | INTEGER | FK → `handle.ROWID` (the *other* party for inbound)  |
 | `date`                  | INTEGER | Send time. Apple-epoch nanoseconds (since 2001-01-01 UTC) |
-| `date_read`             | INTEGER | Read receipt time, same epoch                        |
-| `date_delivered`        | INTEGER | Delivery time, same epoch                            |
+| `date_read`             | INTEGER | Read receipt time, same epoch. **`0` is common even when `is_read = 1`** — see Vector 8 |
+| `date_delivered`        | INTEGER | Delivery time, same epoch. Same flag/timestamp split as `date_read` |
+| `is_read`               | INTEGER | Read flag. Independent of `date_read`; syncs via Messages in iCloud without the timestamp |
 | `date_edited`           | INTEGER | **Non-zero on edits AND retractions** (Apple-epoch ns) |
 | `date_retracted`        | INTEGER | Schema column reserved for retractions; **unused on Darwin 24** |
 | `is_empty`              | INTEGER | `1` after retraction (also `1` for some empty system messages) |
@@ -269,6 +270,30 @@ python3 scripts/edit-history.py --handle '+1XXXXXXXXXX' --rowid 12345
 ```
 
 Unlike the unsent-recovery flow, this vector doesn't race against WAL checkpointing — the chronology lives on the row itself. See [docs/recovery-vectors.md § Vector 7](docs/recovery-vectors.md#vector-7--message_summary_info-edit-chronology-ec-chain) for the full technical reference.
+
+### Bonus — *when was this read?*: `scripts/read-receipts.py`
+
+Messages.app shows one boolean: "Read". `chat.db` stores a flag and a timestamp **independently**, and they disagree constantly — which is why "it says Read, but when?" has no answer in the UI. There are three states, not two:
+
+| State | Predicate | Meaning |
+|---|---|---|
+| `timestamped` | `date_read != 0` | The exact receipt time is on this Mac. |
+| `flagged_only` | `is_read = 1 AND date_read = 0` | Messages shows "Read" — the *time* was never written here. |
+| `none` | `is_read = 0 AND date_read = 0` | No receipt: unread, or read receipts are off. |
+
+`flagged_only` is the state the UI can't express, and it's common — on a real 412k-row `chat.db` it was **40% of read-flagged outgoing messages**. It's the signature of a status that arrived via Messages in iCloud from another device: the boolean syncs, the receipt time doesn't.
+
+```bash
+python3 scripts/read-receipts.py --rowid 412318                  # one message, in detail
+python3 scripts/read-receipts.py --handle '+1XXXXXXXXXX' --since 30d
+python3 scripts/read-receipts.py --audit --since 90d --json      # per-thread receipt health
+```
+
+Direction matters: on your own messages `date_read` is *their* receipt; on theirs it's when *you* read it. `--audit` adds send→read latency (p50/p90) and a trend inference over recent un-timestamped outgoing messages — deliberately conservative, since a thread with receipts disabled and a thread nobody opened look identical in `chat.db`. Message bodies are withheld unless you pass `--with-text`.
+
+`--handle` matches through chat membership, not just `message.handle_id`: Messages leaves that column unset on ~45% of outgoing rows, so filtering on it alone would drop most of what you're asking about.
+
+See [docs/recovery-vectors.md § Vector 8](docs/recovery-vectors.md#vector-8--read--delivery-receipt-state-is_read-vs-date_read) for the failure modes — SMS carries no receipts at all, RCS is carrier-dependent, and group chats store one `date_read` per message rather than one per participant.
 
 ## Limitations — what this tool *cannot* recover
 

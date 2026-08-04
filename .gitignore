@@ -28,6 +28,9 @@ wal-candidates.json
 exporter-hits.txt
 chat-search.tsv
 candidates.tsv
+read-receipts.json
+read-receipts.txt
+edit-history.json
 export/
 
 # Editor / IDE

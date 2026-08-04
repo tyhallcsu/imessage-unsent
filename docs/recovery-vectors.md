@@ -14,10 +14,13 @@ For each vector below: what it does, where it fires from in the orchestrator, th
 | 5      | `exporter-hits.txt`                             | No                  | Cross-check via third-party tool                            |
 | 6      | `iphone-backup.json`                            | No                  | Last-resort lookup in unencrypted iPhone backups            |
 | 7      | (separate CLI: `edit-history.py`)               | No                  | Recovers prior versions of **edited** messages from the `ec` chain in `message_summary_info` — distinct from the unsent flow above |
+| 8      | (separate CLI: `read-receipts.py`)              | No                  | Reports **read/delivery receipt** state — including the "Read, but no timestamp" case Messages.app cannot express |
 
 When `--json` is set, [`scripts/lib/json_report.py`](../scripts/lib/json_report.py) emits the final report from Vector 4's first candidate, falling back to Vector 6 if WAL extraction came up empty. Vectors 2, 3, and 5 are metadata/cross-check and never appear directly in the JSON `recovered.text_b64` field.
 
 Vector 7 is intentionally a separate CLI tool, not a step in `recover.sh`, because it operates on a different predicate (`is_empty = 0` rather than `= 1`) and its source — the `ec` chronology array — sits on the row itself, so it doesn't race against WAL checkpointing. See [`scripts/edit-history.py`](../scripts/edit-history.py).
+
+Vector 8 is likewise standalone. It doesn't recover *content* at all — it reports on receipt metadata that is present on ordinary rows, so it has no predicate in common with the retraction flow. See [`scripts/read-receipts.py`](../scripts/read-receipts.py).
 
 ---
 
@@ -285,6 +288,61 @@ The daemon mitigates this with a **rolling snapshot buffer** at `~/Library/Appli
 
 ---
 
+## Vector 8 — read / delivery receipt state (`is_read` vs `date_read`)
+
+**Purpose.** Answer "when was this message read?" honestly. Messages.app renders one boolean — "Read" or nothing — but `chat.db` stores a flag and a timestamp *independently*, per direction, and they disagree constantly. That produces three states, not two:
+
+| State | Predicate | Meaning |
+|---|---|---|
+| `timestamped` | `date_read != 0` | The exact receipt time is on this Mac. |
+| `flagged_only` | `is_read = 1 AND date_read = 0` | Messages shows "Read", but the *time* was never written here. |
+| `none` | `is_read = 0 AND date_read = 0` | No receipt at all — unread, or receipts disabled. |
+
+The same three states apply to `is_delivered` / `date_delivered`.
+
+`flagged_only` is the state the UI cannot express and the reason this vector exists. It is the signature of a row whose status arrived via Messages in iCloud from another device: the boolean syncs, the receipt timestamp does not. On a real 412k-row `chat.db` it accounted for **40% of read-flagged outgoing messages** — so "it says Read but I can't tell you when" is the common case, not an edge case.
+
+**Direction changes what `date_read` means:**
+
+- `is_from_me = 1` → the *recipient* read the message you sent.
+- `is_from_me = 0` → *you* read the message they sent.
+
+**Triggered when.** Only when the user runs [`scripts/read-receipts.py`](../scripts/read-receipts.py). Never part of `recover.sh` — receipts live on ordinary rows and share no predicate with the `is_empty = 1` retraction flow.
+
+**Code path:**
+- Opens `chat.db` read-only (`mode=ro` SQLite URI via [`scripts/lib/chatdb_time.py`](../scripts/lib/chatdb_time.py)), selects `date`, `date_read`, `is_read`, `date_delivered`, `is_delivered`, `service`, `is_from_me`, `is_empty`, `date_edited`, narrowed by any of `--handle`, `--rowid`, `--guid`, `--since`, `--direction`, `--service`, `--limit`.
+- Classifies each row into the three states above, computes send→read latency where both ends are timestamped, and flags group-chat rows via a correlated subquery on `chat_handle_join` (a join would duplicate messages that belong to more than one chat).
+- **Resolves the counterparty from chat membership, not just `handle_id`.** Messages leaves `message.handle_id = 0` on roughly *half* of all outgoing rows — 45% on the 412k-row database this vector was developed against. A `--handle` filter matching only `handle.id` would silently drop most outgoing traffic, which is precisely the population being reported on. The filter therefore also matches via `chat_message_join → chat_handle_join`, and each record carries `handle_source` (`handle` / `chat` / `unknown`) so an inferred attribution is never mistaken for a stored one.
+- `--audit` aggregates per handle: state census, latency p50/p90, and a **trend inference** over the most recent consecutive outgoing iMessages that lack a read timestamp.
+
+**Reads:** `~/Library/Messages/chat.db` (or `--db PATH`).
+
+**Writes:** nothing to disk; report goes to stdout (text or `--json`).
+
+**Returns nothing / says nothing useful when:**
+
+| Condition | Why |
+|---|---|
+| The transport is SMS | SMS has no read-receipt concept at all. Every SMS row looks like `none`. The trend inference skips them for exactly this reason; a report that counted them would manufacture a false "receipts are off" signal. |
+| The transport is RCS | Receipts are carrier-dependent and inconsistent. Reported as `carrier-dependent`, not trusted. |
+| The chat is a group | `message.date_read` is single-valued. There is no per-participant read state in `chat.db`, so a group row tells you *someone* read it, not who. Rows are flagged `is_group_chat` so the number isn't mistaken for per-person data. |
+| The row is `flagged_only` | The receipt time was never written to this Mac and cannot be reconstructed from it. Only a device that received the receipt directly (typically the iPhone, via a device backup) can still hold it. |
+| `--since` is too narrow | The trend inference reports `never_observed_in_window` rather than guessing. Widen the window before drawing a conclusion. |
+| The result set hit `--limit` | Output is marked `truncated: true` (and the text renderer prints a note). The summary and trend are explicitly partial rather than silently wrong. |
+
+**Subtleties:**
+
+- **The trend inference is an inference from an absence.** A thread where the other party disabled read receipts and a thread where they simply never opened your messages look *identical* in `chat.db`. The tool distinguishes what it can and refuses to over-claim, emitting one of: `observed`, `flags_without_timestamps`, `likely_disabled`, `mixed`, `unclear`, `never_observed_in_window`, `no_data`. `--min-run` (default 10) sets how many consecutive un-timestamped outgoing iMessages are needed before any trend is named at all.
+- **The inference and the latency percentiles run on outgoing 1:1 iMessage rows only.** SMS has no receipts and group rows have no per-participant attribution, so both would bias the result. Group rows are still counted (`group_messages` in the summary) rather than dropped silently — `--handle` matches that person's group chats too, since half of outgoing rows can only be attributed through chat membership in the first place.
+- **A lopsided run gets a headline, not a shrug.** When ≥90% of the run shares one explanation, that becomes the status; the minority count is still stated in the note, so `likely_disabled` on a 119-vs-3 run cannot be read as unanimous.
+- **`flags_without_timestamps` is a different finding from `likely_disabled`,** and conflating them is the mistake this vector exists to prevent. A run of `flagged_only` rows *proves* the messages were read — the receipts arrived, this Mac just didn't record when. A run of `none` rows proves nothing either way.
+- **Legacy second-precision timestamps.** Pre-High-Sierra rows store Apple-epoch *seconds*, not nanoseconds. `chatdb_time.normalize_apple_ts` upconverts them so a migrated-forward database doesn't render 1970-era dates. Modern databases are entirely ns.
+- **Message text is withheld by default.** Only `--with-text` includes bodies, so default output is safe to paste into an issue. Enforced by `tests/bats/60-guardrail-no-chatdb-writes.bats`.
+- **Read-only invariant.** `mode=ro` guarantees `chat.db` and `chat.db-wal` are untouched (guarded in bats and in `tests/python/test_read_receipts.py::test_readonly_invariant`). SQLite *does* rebuild the `chat.db-shm` WAL index on attach — that file is a rebuildable index, not message data, and `immutable=1` is deliberately not used because it would make SQLite ignore the WAL, which is where this project's un-checkpointed rows live.
+- **Shared time helpers.** Vectors 7 and 8 both use [`scripts/lib/chatdb_time.py`](../scripts/lib/chatdb_time.py) so the Apple-epoch conversion cannot drift between the two tools.
+
+---
+
 ## Limitations — when each vector fails
 
 Each vector has a failure mode. When all of them fail it's almost always for the same underlying reason: **SQLite WAL is a rolling buffer, not an audit log.** Once iMessage commits and SQLite checkpoints the WAL into `chat.db`, the original page image is overwritten — the unsent text is no longer on disk anywhere outside external backups (Vector 6).
@@ -299,6 +357,7 @@ Each vector has a failure mode. When all of them fail it's almost always for the
 | 5 — `imessage-exporter` cross-check | Same root cause as Vector 4 — operates on the same `chat.db` post-retract. Useful as a sanity check, not as a primary vector. |
 | 6 — external backups | No backup exists for the relevant time window, or the iTunes/Finder backup is encrypted (this tool cannot decrypt). Time Machine and APFS local snapshots are the most reliable subset when configured. |
 | 7 — `ec` edit chronology | The message was unsent (full retraction wipes `msi.ec`), the row was hard-deleted, or the edit was a non-text content type (attachment, Tapback) whose typedstream encoding doesn't follow the plain-text NSString pattern. Plain-text edits recover reliably for the lifetime of the row. |
+| 8 — read/delivery receipts | The row is `flagged_only` — the receipt time was never written to this Mac, and no amount of local forensics reconstructs it (check a device backup instead). Also inherently blind on SMS (no receipts exist), unreliable on RCS (carrier-dependent), and non-attributable in group chats (one `date_read` per message, not per participant). |
 
 ### Practical guidance to maximize recovery rate
 

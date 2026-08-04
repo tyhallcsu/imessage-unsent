@@ -11,6 +11,18 @@ Modular recovery primitives sourced by `scripts/recover.sh`. This directory impl
 | `wal.sh` | `imu_extract_from_wal <wal_path> <guid>` | Search WAL for GUID byte string and extract pre-retract UTF-8. Returns TSV `offset<TAB>length<TAB>text`. |
 | `decode.sh` | `imu_decode_blobs <ab_path> <msi_path>` | Wraps `scripts/decode.py` with a uniform shell interface. |
 
+## Python helpers
+
+| File | Consumed by | Responsibility |
+|---|---|---|
+| `wal_extract.py` | `wal.sh` | Vector 4 byte-forensics core — scan WAL frames for the pre-retract page. |
+| `wal_merge_candidates.py` | `recover.sh` | Merge live-WAL hits with the daemon's rolling snapshot buffer (PR #68). |
+| `json_report.py` | `recover.sh --json` | Emit the final recovery report. |
+| `batch_report.py` | `recover.sh --handles-file` | Aggregate batch-mode results. |
+| `iphone_backup.py` | `recover.sh --include-iphone-backup` | Vector 6 lookup in unencrypted iPhone backups. |
+| `recovery_selection.py` | `recover.sh` | Pick the best candidate across vectors. |
+| `chatdb_time.py` | `edit-history.py`, `read-receipts.py` | Shared Apple-epoch conversion, `--since` parsing, and the read-only SQLite connection for the standalone Vector 7 / Vector 8 CLIs. |
+
 ## Conventions
 
 - Each lib starts with a source guard: `[[ -n "${IMU_LIB_<NAME>:-}" ]] && return; IMU_LIB_<NAME>=1`.
