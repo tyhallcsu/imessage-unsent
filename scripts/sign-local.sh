@@ -72,10 +72,16 @@ Both binaries now have a stable identity. Two consequences:
   1. Contacts can now be granted. Open the app's Settings and click
      "Enable Contacts" — the macOS prompt should appear this time.
 
-  2. Full Disk Access for the daemon was bound to the OLD signature. Re-grant it:
-       System Settings → Privacy & Security → Full Disk Access
-       toggle imu-watcher off, then on
+  2. Full Disk Access MAY need re-granting. Changing the signature changes the
+     daemon's code identity, which can invalidate the grant — though measured on
+     an adhoc-to-Apple-Development re-sign it survived. Check before touching it:
+
        launchctl kickstart -k gui/$(id -u)/com.imu.watcher
+       printf '{"op":"status"}\n' | nc -U "$HOME/Library/Application Support/imessage-unsent/daemon.sock"
+
+     If chat_db_readable is true you are done. If it is false, re-grant:
+       System Settings → Privacy & Security → Full Disk Access
+       toggle imu-watcher off, then on, then kickstart again
 
 Re-running make daemon-install or reinstalling the app REPLACES these binaries
 with unsigned ones, so re-run this script after any upgrade.
