@@ -40,8 +40,16 @@ jobs:
         # Version-pinned for the same reason: a bare `pipx run zizmor` installs
         # whatever is latest, so a new release could change findings or config
         # semantics and break CI with no commit to point at.
+        #
+        # `--offline` so a blocking gate cannot go red because the GitHub API had
+        # a bad minute. It is also the mode this baseline was verified in — the
+        # online audits (ref-confusion, impostor-commit, known-vulnerable-actions)
+        # have never been run against this repo, so enabling them here would ship
+        # an unverified gate. Tracked as a follow-up: those audits are the natural
+        # compensating control for the `actions/*: ref-pin` policy in zizmor.yml,
+        # and are worth turning on once someone can baseline them.
         run: |
-          pipx run zizmor==1.29.0 --config zizmor.yml .github/workflows/
+          pipx run zizmor==1.29.0 --offline --config zizmor.yml .github/workflows/
 
   shellcheck:
     name: Shellcheck (all shell sources)
