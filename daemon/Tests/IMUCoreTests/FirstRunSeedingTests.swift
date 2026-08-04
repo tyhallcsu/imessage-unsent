@@ -161,7 +161,7 @@ final class FirstRunSeedingTests: XCTestCase {
   func testRestartWithValidStateDoesNotMislabelACatchUpMiss() throws {
     // A genuine wal_checkpointed miss detected after an ordinary restart must NOT
     // be relabelled predates_monitoring — that would report a real failure as
-    // expected behaviour. Only a freshly seeded baseline may set the flag.
+    // expected behaviour. Only a fresh-state launch may set the flag.
     let chatDB = dir.appendingPathComponent("chat.db")
     try makeChatDB(at: chatDB)
     let stateURL = dir.appendingPathComponent("state.json")
@@ -213,7 +213,7 @@ final class FirstRunSeedingTests: XCTestCase {
 
   // MARK: - Classification
 
-  func testEventsAreTaggedRelativeToTheMonitoringBaseline() throws {
+  func testEventsAreTaggedRelativeToTheMonitoringStartInstant() throws {
     let detector = try makeDetector(stateURL: dir.appendingPathComponent("state.json"))
     let start = detector.monitoringStartedAt
 

@@ -11,15 +11,16 @@ public struct RetractionDetected: Equatable {
   /// columns. `nil` means "we don't know", never "it wasn't read".
   public let readContext: RetractionReadContext?
 
-  /// True only when this launch seeded a FRESH baseline and the retraction predates
-  /// it. After an ordinary restart with valid state, an older event is a genuine
-  /// catch-up miss and keeps its real failure category.
+  /// True only when this launch started from fresh state AND the retraction predates
+  /// `monitoringStartedAt` — the launch instant, which is a grace window LATER than
+  /// the seeded high-water mark. After an ordinary restart with valid state, an
+  /// older event is a genuine catch-up miss and keeps its real failure category.
   ///
   /// It says nothing about whether monitoring was active earlier — a quarantined
-  /// corrupt state resets the baseline for an installation that had been running
-  /// for months. Recovery is still attempted (the page may still be in the live
-  /// WAL); a failure just means the miss is explained by where the baseline was
-  /// set, not by losing a race we were running (issue #160).
+  /// corrupt state re-establishes the starting point for an installation that had
+  /// been running for months. Recovery is still attempted (the page may still be in
+  /// the live WAL); a failure just means the miss is explained by when this launch
+  /// began monitoring, not by losing a race we were running (issue #160).
   public let precedesMonitoring: Bool
 
   public init(
@@ -220,13 +221,15 @@ public final class RetractionDetector {
   private let maxAttemptCounts: Int
   private var state: DetectorState
 
-  /// Apple-epoch ns at which this process began watching. Retractions older than
-  /// this fall outside the baseline established by THIS launch — which is not the
-  /// same as never having been monitored, since a state reset re-establishes the
-  /// baseline for an installation that was already running.
+  /// Apple-epoch ns at which this process began watching. Distinct from the seeded
+  /// high-water mark, which sits one grace window earlier — so an event can be after
+  /// the seed (hence detected) and still before this instant. Retractions older than
+  /// this were not being tracked by THIS launch, which is not the same as never
+  /// having been monitored: a state reset restarts monitoring for an installation
+  /// that was already running.
   public let monitoringStartedAt: Int64
 
-  /// Whether this launch seeded a fresh baseline (no state, or corrupt state).
+  /// Whether this launch started from fresh state (missing, or corrupt+quarantined).
   public let didSeedFreshState: Bool
 
   public init(

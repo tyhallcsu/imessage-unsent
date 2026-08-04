@@ -13,7 +13,7 @@ public enum RecoveryFailureCategory: String, Codable, Equatable, CaseIterable {
   /// Note this is measured against the launch instant, not against the seeded
   /// high-water mark: the seed sits a grace window EARLIER, so an event can be
   /// after the seed (hence detected at all) and still before monitoring started. A miss in this
-  /// category reflects where the baseline was set, not the health of the daemon,
+  /// category reflects when this launch began monitoring, not the health of the daemon,
   /// and is not proof the text was unrecoverable — an older page can still be in
   /// the live WAL. Distinct from `walCheckpointed`, which means we
   /// WERE tracking and lost the race (issue #160).
