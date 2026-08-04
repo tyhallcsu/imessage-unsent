@@ -11,7 +11,9 @@ public struct RetractionDetected: Equatable {
   /// columns. `nil` means "we don't know", never "it wasn't read".
   public let readContext: RetractionReadContext?
 
-  /// True when this retraction happened before the daemon began watching — it
+  /// True only when this launch seeded a FRESH baseline and the retraction predates
+  /// it. After an ordinary restart with valid state, an older event is a genuine
+  /// catch-up miss and keeps its real failure category. It
   /// can only ever be a grace-window candidate. Recovery is still attempted
   /// (the page may still be in the live WAL), but a failure means "we weren't
   /// there", not "we lost the race" (issue #160).
@@ -246,8 +248,15 @@ public final class RetractionDetector {
       // Clamped at 0: a grace window larger than the age of the database seeds
       // to 0, which is the old "every retraction ever" behaviour. That makes the
       // knob continuous — a bigger number looks further back, with no sentinel.
+      // Clamp before converting: `Int64(Double)` TRAPS on overflow, so an
+      // arbitrarily large `monitoring_grace_seconds` typo would crash the daemon
+      // on every launch — a launchd respawn loop, the #109 failure class. The
+      // useful maximum is the age of the Apple epoch itself; beyond that the seed
+      // is 0 ("all history") anyway.
+      let maxUsefulGrace = max(0, startedAt.timeIntervalSince1970 - 978_307_200)
+      let grace = min(max(0, monitoringGraceWindow), maxUsefulGrace)
       self.state.lastSeenDateEdited = max(0, appleEpochNanoseconds(
-        from: startedAt.addingTimeInterval(-monitoringGraceWindow)
+        from: startedAt.addingTimeInterval(-grace)
       ))
       try stateStore.save(self.state)
     }
@@ -487,7 +496,7 @@ public final class RetractionDetector {
           handle: handle,
           editedAt: editedAt,
           readContext: readContext,
-          precedesMonitoring: editedAt < monitoringStartedAt
+          precedesMonitoring: didSeedFreshState && editedAt < monitoringStartedAt
         )
       )
     }

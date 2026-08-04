@@ -119,22 +119,88 @@ final class FirstRunSeedingTests: XCTestCase {
 
   // MARK: - Grace-window boundary
 
-  func testGraceWindowBoundaryIsExactlyFiveMinutes() throws {
-    let detector = try makeDetector(stateURL: dir.appendingPathComponent("state.json"))
+  func testGraceWindowBoundaryIsEnforcedBySQLNotArithmetic() throws {
+    // The predicate is `date_edited > seed` (strict), so seed-1 and seed itself
+    // must be excluded and only seed+1 detected. Asserting that against a real
+    // database rather than against arithmetic — an earlier version of this test
+    // checked `seed + 1 > seed`, which is true regardless of whether the seeding
+    // works at all.
+    let chatDB = dir.appendingPathComponent("chat.db")
+    try makeChatDB(at: chatDB)
+
     let seed = expectedSeed
+    try insertRetraction(into: chatDB, guid: "before-window", dateEdited: seed - 1)
+    try insertRetraction(into: chatDB, guid: "exactly-at-seed", dateEdited: seed)
+    try insertRetraction(into: chatDB, guid: "inside-window", dateEdited: seed + 1)
 
-    // A retraction one second INSIDE the window is still a candidate: the SQL
-    // predicate is `date_edited > seed`.
-    XCTAssertGreaterThan(seed + 1_000_000_000, seed)
-    // One second OUTSIDE is excluded.
-    XCTAssertLessThan(seed - 1_000_000_000, seed)
+    let detector = try RetractionDetector(
+      chatDBURL: chatDB,
+      stateStore: DetectorStateStore(url: dir.appendingPathComponent("state.json")),
+      monitoringGraceWindow: graceWindow,
+      now: { self.fixedNow }
+    )
+    let guids = try detector.detect().map(\.guid)
+    XCTAssertEqual(guids, ["inside-window"])
+  }
 
-    // And everything in the window predates monitoring, so a failure there is
-    // "we weren't watching yet", not "we lost the race".
-    XCTAssertLessThan(seed, detector.monitoringStartedAt)
+  func testAnEventOlderThanTheWindowIsNotDetectedAtAll() throws {
+    // The #160 scenario in miniature: a 2023-era retraction on a fresh install.
+    let chatDB = dir.appendingPathComponent("chat.db")
+    try makeChatDB(at: chatDB)
+    try insertRetraction(into: chatDB, guid: "from-2023", dateEdited: 700_000_000_000_000_000)
+
+    let detector = try RetractionDetector(
+      chatDBURL: chatDB,
+      stateStore: DetectorStateStore(url: dir.appendingPathComponent("state.json")),
+      monitoringGraceWindow: graceWindow,
+      now: { self.fixedNow }
+    )
+    XCTAssertEqual(try detector.detect().count, 0)
+  }
+
+  func testRestartWithValidStateDoesNotMislabelACatchUpMiss() throws {
+    // A genuine wal_checkpointed miss detected after an ordinary restart must NOT
+    // be relabelled predates_monitoring — that would report a real failure as
+    // expected behaviour. Only a freshly seeded baseline may set the flag.
+    let chatDB = dir.appendingPathComponent("chat.db")
+    try makeChatDB(at: chatDB)
+    let stateURL = dir.appendingPathComponent("state.json")
+    // Valid pre-existing state: this daemon has run before.
+    try DetectorStateStore(url: stateURL).save(DetectorState(lastSeenDateEdited: 1_000))
+
+    // An event older than this process's start, but after the stored high-water.
+    try insertRetraction(into: chatDB, guid: "catch-up", dateEdited: expectedSeed + 1)
+
+    let detector = try RetractionDetector(
+      chatDBURL: chatDB,
+      stateStore: DetectorStateStore(url: stateURL),
+      monitoringGraceWindow: graceWindow,
+      now: { self.fixedNow }
+    )
+    XCTAssertFalse(detector.didSeedFreshState)
+    let event = try XCTUnwrap(try detector.detect().first)
+    XCTAssertEqual(event.guid, "catch-up")
+    XCTAssertLessThan(event.editedAt, detector.monitoringStartedAt)
+    XCTAssertFalse(
+      event.precedesMonitoring,
+      "an existing install's catch-up miss is a real failure, not 'we weren't watching'"
+    )
+  }
+
+  func testAbsurdGraceWindowClampsInsteadOfTrapping() throws {
+    // Int64(Double) traps on overflow; under launchd that is a respawn loop from a
+    // config typo (the #109 failure class).
+    let detector = try RetractionDetector(
+      chatDBURL: dir.appendingPathComponent("chat.db"),
+      stateStore: DetectorStateStore(url: dir.appendingPathComponent("state.json")),
+      monitoringGraceWindow: 9_000_000_000_000_000_000,
+      now: { self.fixedNow }
+    )
+    XCTAssertTrue(detector.didSeedFreshState)
+    // Clamps to "all history" rather than crashing.
     XCTAssertEqual(
-      detector.monitoringStartedAt - seed,
-      Int64(graceWindow) * 1_000_000_000
+      try DetectorStateStore(url: dir.appendingPathComponent("state.json")).load().lastSeenDateEdited,
+      0
     )
   }
 
@@ -162,6 +228,41 @@ final class FirstRunSeedingTests: XCTestCase {
         editedAt: start + 1, precedesMonitoring: start + 1 < start
       ).precedesMonitoring
     )
+  }
+
+  // MARK: - Helpers
+
+  private func makeChatDB(at url: URL) throws {
+    try runSQLite(url, sql: """
+    CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT NOT NULL, service TEXT);
+    CREATE TABLE message (
+      ROWID INTEGER PRIMARY KEY,
+      guid TEXT NOT NULL,
+      handle_id INTEGER,
+      date_edited INTEGER,
+      is_empty INTEGER,
+      is_from_me INTEGER
+    );
+    INSERT INTO handle (ROWID, id, service) VALUES (1, '+15550001000', 'iMessage');
+    """)
+  }
+
+  private func insertRetraction(into url: URL, guid: String, dateEdited: Int64) throws {
+    try runSQLite(url, sql: """
+    INSERT INTO message (guid, handle_id, date_edited, is_empty, is_from_me)
+    VALUES ('\(guid)', 1, \(dateEdited), 1, 0);
+    """)
+  }
+
+  private func runSQLite(_ url: URL, sql: String) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+    process.arguments = [url.path, sql]
+    process.standardOutput = Pipe()
+    process.standardError = Pipe()
+    try process.run()
+    process.waitUntilExit()
+    XCTAssertEqual(process.terminationStatus, 0)
   }
 
   func testPredatesMonitoringIsADistinctCategoryInBothMirrors() {
