@@ -108,8 +108,10 @@ remaining Mediums plus a fresh three-domain audit (see
 
 Open issues to watch:
 - **#127** — add actionlint (and consider zizmor) to CI.
-- **#96** — audit/findings tracker (post-v0.2.1-rc1); superseded in practice by
-  `docs/V0.5-AUDIT-REPORT.md`, which lists every remaining documented-only Low.
+- **#174** — daemon log records real handles in cleartext, unrotated (was D-7).
+- **#25** — per-archive encryption. Scope was rewritten 2026-08-04 after a design
+  review; the original spec should not be built. Blocked on a keychain/packaging
+  decision (bundle vs file-based ACL).
 - **#16 / #15** — Restore mode research (write to chat.db). `ethics-review-required`,
   feature-flagged off; needs consent-flow UI before unflagging.
 - **#26** — Roadmap (pinned). Phase ordering and milestone dependencies live here.
