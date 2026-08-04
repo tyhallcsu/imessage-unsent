@@ -214,9 +214,10 @@ public struct ArchivePipeline {
       }
       let recovered = recoveryJSONHasText(outputData)
       var failureCategory = recovered ? nil : recoveryJSONFailureCategory(outputData)
-      // For a retraction that precedes this fresh-state launch's monitoring start,
-      // "wal_checkpointed" (we were watching and lost the race) is the wrong story
-      // to tell — we were not tracking it yet, whatever happened before. Reclassify ONLY that and the no-diagnosis case: every other category
+      // For a retraction preceding this fresh-state launch's monitoring start we
+      // know we were not tracking it, so "wal_checkpointed" is the wrong story.
+      // Outside that case we cannot tell — the daemon may have been down — so
+      // wal_checkpointed stays as the honest default rather than being widened. Reclassify ONLY that and the no-diagnosis case: every other category
       // is a specific finding that survives on its own merits — `script_error` is a
       // real defect, `not_in_local_wal` means the retract never reached this device
       // at all (typical of a remote group-chat retraction), `unknown_handle` and

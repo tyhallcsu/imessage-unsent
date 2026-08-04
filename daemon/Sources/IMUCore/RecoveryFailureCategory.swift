@@ -16,7 +16,8 @@ public enum RecoveryFailureCategory: String, Codable, Equatable, CaseIterable {
   /// category reflects when this launch began monitoring, not the health of the daemon,
   /// and is not proof the text was unrecoverable — an older page can still be in
   /// the live WAL. Distinct from `walCheckpointed`, which means we
-  /// WERE tracking and lost the race (issue #160).
+  /// could not be inferred: without a fresh-state launch we cannot tell whether we
+  /// were tracking at the time, so `walCheckpointed` is the honest default (#160).
   case predatesMonitoring = "predates_monitoring"
   case scriptError = "script_error"
   case unknown

@@ -43,7 +43,7 @@ The CLI (Phase 1) is the recovery primitive. The daemon (Phase 2) automates *whe
 | Phase | Why it exists |
 |---|---|
 | 1 — CLI | Today the script is a 250-line monolith. Modular libs let the daemon and tests reuse the recovery primitives without forking the logic. |
-| 2 — Daemon | Manual recovery requires the user to react within minutes. The daemon catches retractions in <1 second so they're never lost to WAL checkpoints. |
+| 2 — Daemon | Manual recovery requires the user to react within minutes. The daemon catches retractions in <1 second so they're less often lost to WAL checkpoints (best-effort — see the Limitations section and #169). |
 | 3 — GUI | Surfacing recoveries inside Messages.app is impossible (we don't ship as a Messages plugin). A menu bar app is the right macOS-native surface. |
 | 4 — Anti-Retraction | The big question: should we just *show* the original (Notify-only, default) or *restore* it in chat.db (experimental, opt-in)? Issue #15 is research; #16 is implementation gated by #15; #17 codifies the safe default. |
 | 5 — Distribution | Code-signed, notarized binaries so installation doesn't require disabling Gatekeeper. |

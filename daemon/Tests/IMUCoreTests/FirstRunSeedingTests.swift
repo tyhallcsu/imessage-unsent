@@ -183,7 +183,7 @@ final class FirstRunSeedingTests: XCTestCase {
     XCTAssertLessThan(event.editedAt, detector.monitoringStartedAt)
     XCTAssertFalse(
       event.precedesMonitoring,
-      "an existing install's catch-up miss is a real failure, not 'we weren't watching'"
+      "without a fresh-state launch we cannot infer predates_monitoring: the daemon may or may not have been running, so the category must not be claimed"
     )
   }
 
