@@ -311,7 +311,16 @@ The cases this tool will reliably miss:
   The *fact* that those older retractions happened is not lost — the rows are still in `chat.db` and queryable at any time. Their text is very unlikely to still be reachable, but that is a matter of odds rather than a guarantee, which is why the window is adjustable rather than fixed. If you want a one-off backfill anyway, set `monitoring_grace_seconds` in `~/.config/imessage-unsent/config.toml` to something larger than the age of your database (it must be a top-level key, above any `[section]` header). `0` means "from this moment on"; the default is `300`.
 
 > [!IMPORTANT]
-> The setting is only consulted when the daemon starts from a **fresh state** — a first launch, or the first tick after `~/.config/imessage-unsent/state.json` is removed or quarantined. On an install that already has state, changing it does nothing; delete `state.json` first if you actually want to re-scan. This is deliberate: silently re-scanning history whenever a config value changed is how you get 243 archives you didn't ask for.
+> The setting is only consulted when the daemon starts from a **fresh state** — a first launch, or the first start after `~/.config/imessage-unsent/state.json` is removed or quarantined. Config and state are both read once at startup, so editing either under a running daemon does nothing (and the running process can rewrite `state.json` from memory afterwards). The sequence that actually works:
+>
+> ```bash
+> launchctl bootout gui/$(id -u)/com.imu.watcher
+> # edit ~/.config/imessage-unsent/config.toml  (top-level monitoring_grace_seconds)
+> rm ~/.config/imessage-unsent/state.json
+> launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.imu.watcher.plist
+> ```
+>
+> Re-reading the config on every launch is deliberate rather than on every change: silently re-scanning history because a value moved is how #160 produced 243 archives nobody asked for.
 
 The daemon mitigates the WAL-checkpoint race by maintaining a **rolling snapshot buffer** at `~/Library/Application Support/imessage-unsent/wal-history/` — every change to `chat.db-wal` is copied into the buffer (capped at 30 snapshots / 5 minutes by default), so the recovery script can also scan WAL frames that the live file no longer contains. This dramatically improves the recovery rate for slow-unsend cases but cannot help if the daemon wasn't running, didn't have Full Disk Access, or wasn't installed at the time the message was originally written.
 

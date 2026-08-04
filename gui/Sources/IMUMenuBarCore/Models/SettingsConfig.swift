@@ -7,6 +7,11 @@ public struct SettingsConfig: Equatable {
   public var logLevel: String
   public var dataDir: String
   public var archiveRetention: Int
+  /// Not editable in the Settings pane, but mirrored so a GUI save does not delete
+  /// it. `ConfigFileStore.serialize` rewrites the whole file, so any daemon key the
+  /// GUI does not model is silently dropped — which would have reset the #160
+  /// backfill escape hatch the moment a user toggled an unrelated setting.
+  public var monitoringGraceSeconds: Int
   public var notifications: SettingsNotifications
   public var experimental: SettingsExperimental
 
@@ -14,12 +19,14 @@ public struct SettingsConfig: Equatable {
     logLevel: String = "info",
     dataDir: String = "~/Library/Application Support/imessage-unsent",
     archiveRetention: Int = 100,
+    monitoringGraceSeconds: Int = 300,
     notifications: SettingsNotifications = SettingsNotifications(),
     experimental: SettingsExperimental = SettingsExperimental()
   ) {
     self.logLevel = logLevel
     self.dataDir = dataDir
     self.archiveRetention = archiveRetention
+    self.monitoringGraceSeconds = monitoringGraceSeconds
     self.notifications = notifications
     self.experimental = experimental
   }
