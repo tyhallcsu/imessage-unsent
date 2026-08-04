@@ -1,0 +1,47 @@
+{
+  "meta": {
+    "session": "post-v0.5-forensics-cycle",
+    "title": "imessage-unsent — completion loop",
+    "generatedAt": null,
+    "status": "NOT STARTED",
+    "note": "Template seed shown only before the first live write. Live state is artifacts/progress/progress.json (gitignored); the durable record is docs/PROGRESS.md + docs/handoffs/IMESSAGE-UNSENT_COMPLETION_TRACKER_2026-08-04.md."
+  },
+  "overall": {
+    "completionPct": 0,
+    "phase": "Phase 0 — read-only reconstruction",
+    "currentMilestone": "—",
+    "summary": "Run /project-completion-loop resume to reconstruct real state from git, GitHub, tests, and the installed daemon."
+  },
+  "position": {
+    "repo": "tyhallcsu/imessage-unsent",
+    "branch": "main",
+    "sha": "—",
+    "issue": null,
+    "pr": null,
+    "prUrl": null
+  },
+  "aiDebate": {
+    "state": "n/a",
+    "room": null,
+    "consensus": null,
+    "unresolved": null,
+    "lastMilestone": null
+  },
+  "tests": { "lastRun": "not run this session", "passed": null, "total": null, "command": "make test && swift test --package-path daemon && swift test --package-path gui" },
+  "security": { "secretScan": "unknown", "audit": "unknown", "newDeps": "none" },
+  "build": { "typecheck": "unknown", "lint": "unknown", "status": "unknown", "command": "make rc-smoke VERSION=v0.0.0-smoke" },
+  "deployment": {
+    "env": "local macOS (LaunchAgent + menu-bar app)",
+    "status": "not deployed this session",
+    "prodSha": "—",
+    "deployId": null,
+    "url": null,
+    "verified": false
+  },
+  "repos": [],
+  "milestones": [],
+  "completed": [],
+  "inProgress": [],
+  "next": "Run /project-completion-loop resume to populate this dashboard from verified repo state.",
+  "blockers": []
+}

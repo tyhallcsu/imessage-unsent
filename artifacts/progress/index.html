@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project completion loop · live progress</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --line:#262b36; --fg:#e6e9ef;
+    --dim:#8b93a7; --accent:#4f8cff; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --info:#a371f7;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f6f7f9; --panel:#fff; --panel2:#f0f2f6; --line:#e3e6ec; --fg:#12151b; --dim:#5b6473; }
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--fg);
+    font:14px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; padding:20px; }
+  .wrap{ max-width:1760px; margin:0 auto; }
+  a{ color:var(--accent); text-decoration:none; } a:hover{ text-decoration:underline; }
+  header{ display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; margin-bottom:4px; }
+  h1{ font-size:19px; margin:0; letter-spacing:-.2px; }
+  h2{ font-size:11px; text-transform:uppercase; letter-spacing:.09em; color:var(--dim); margin:0 0 8px; }
+  .status-pill{ font-size:12px; font-weight:700; padding:2px 10px; border-radius:999px;
+    background:var(--info); color:#fff; }
+  .sub{ color:var(--dim); font-size:12px; }
+  .mono{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  .srcbadge{ font-size:10px; font-weight:700; padding:1px 7px; border-radius:999px; text-transform:uppercase; letter-spacing:.05em; }
+  .src-live{ background:rgba(63,185,80,.16); color:var(--ok); }
+  .src-seed{ background:rgba(210,153,34,.16); color:var(--warn); }
+  .banner{ display:none; margin:10px 0; padding:10px 14px; border-radius:10px;
+    background:rgba(248,81,73,.14); border:1px solid var(--bad); color:var(--bad); font-weight:600; }
+  .bar{ height:12px; border-radius:999px; background:var(--panel2); overflow:hidden; margin:10px 0 4px; border:1px solid var(--line); }
+  .bar > i{ display:block; height:100%; background:linear-gradient(90deg,var(--accent),var(--info)); transition:width .4s ease; }
+  .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; margin:14px 0; }
+  .card{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .card .k{ color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+  .card .v{ font-size:15px; margin-top:3px; word-break:break-word; }
+  .row{ display:flex; justify-content:space-between; gap:10px; padding:3px 0; border-bottom:1px dotted var(--line); }
+  .row:last-child{ border-bottom:0; }
+  .cols{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:820px){ .cols{ grid-template-columns:1fr; } }
+  .pill{ font-size:11px; font-weight:700; padding:1px 8px; border-radius:999px; white-space:nowrap; }
+  .p-done{ background:rgba(63,185,80,.16); color:var(--ok); }
+  .p-in_progress{ background:rgba(79,140,255,.16); color:var(--accent); }
+  .p-pending{ background:rgba(139,147,167,.16); color:var(--dim); }
+  .p-blocked{ background:rgba(210,153,34,.16); color:var(--warn); }
+  ul{ margin:6px 0; padding-left:18px; } li{ margin:2px 0; }
+  .feed{ max-height:340px; overflow:auto; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
+  .ev{ display:flex; gap:10px; padding:6px 12px; border-bottom:1px solid var(--line); font-size:13px; }
+  .ev:last-child{ border-bottom:0; }
+  .ev .t{ color:var(--dim); font-size:11px; white-space:nowrap; min-width:64px; }
+  .ev .b{ font-size:10px; font-weight:700; padding:0 6px; border-radius:4px; height:16px; line-height:16px;
+    align-self:center; white-space:nowrap; background:var(--panel2); color:var(--dim); }
+  /* event-kind chips — every kind emitted by progress-log.mjs has a colour here */
+  .b-info{ background:var(--panel2); color:var(--dim); }
+  .b-test{ background:rgba(63,185,80,.18); color:var(--ok); }
+  .b-build{ background:rgba(79,140,255,.18); color:var(--accent); }
+  .b-security{ background:rgba(210,153,34,.18); color:var(--warn); }
+  .b-commit{ background:rgba(163,113,247,.18); color:var(--info); }
+  .b-push{ background:rgba(79,140,255,.18); color:var(--accent); }
+  .b-pr{ background:rgba(79,140,255,.18); color:var(--accent); }
+  .b-merge{ background:rgba(63,185,80,.18); color:var(--ok); }
+  .b-deploy{ background:rgba(248,81,73,.18); color:var(--bad); }
+  .b-debate{ background:rgba(163,113,247,.18); color:var(--info); }
+  .b-milestone{ background:rgba(210,153,34,.18); color:var(--warn); }
+  .b-blocker{ background:rgba(248,81,73,.18); color:var(--bad); }
+  .b-decision{ background:rgba(210,153,34,.18); color:var(--warn); }
+  .b-handoff{ background:rgba(139,147,167,.22); color:var(--fg); }
+  footer{ color:var(--dim); font-size:11px; margin-top:14px; }
+  .warn{ color:var(--warn); } .bad{ color:var(--bad); } .ok{ color:var(--ok); } .dim{ color:var(--dim); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1 id="title">Project completion loop</h1>
+      <span class="status-pill" id="status">…</span>
+      <span class="srcbadge" id="src"></span>
+      <span class="sub" id="genat"></span>
+    </header>
+    <div class="sub" id="phaseline"></div>
+    <div class="bar"><i id="barfill" style="width:0%"></i></div>
+    <div class="sub"><b id="pct">0</b>% complete · <span id="curmilestone"></span></div>
+    <div class="sub" id="summary" style="margin-top:6px"></div>
+
+    <div class="banner" id="banner"></div>
+
+    <div class="grid" id="cards"></div>
+
+    <div class="cols">
+      <div>
+        <h2>Milestones</h2>
+        <div class="card" id="milestones"></div>
+        <h2 style="margin-top:14px">Blockers · human-only decisions</h2>
+        <div class="card" id="blockers"></div>
+      </div>
+      <div>
+        <h2>Now / next</h2>
+        <div class="card" id="nowcard"></div>
+        <h2 style="margin-top:14px">Repositories · workstream ownership</h2>
+        <div class="card" id="repos"></div>
+      </div>
+    </div>
+
+    <h2 style="margin-top:16px">Activity feed <span class="sub" id="evcount"></span></h2>
+    <div class="feed" id="feed"></div>
+
+    <footer id="foot">auto-refreshing every 5s · reads artifacts/progress/progress.json + events.jsonl</footer>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const bust = url => url + (url.includes('?')?'&':'?') + 't=' + Date.now();
+// Only http(s)/mailto may become a clickable href — esc() alone would happily pass
+// through a javascript:/data: URI. Anything else is rendered as inert text.
+const safeUrl = u => (typeof u === 'string' && /^(https?:\/\/|mailto:)/i.test(u)) ? u : null;
+
+// Prefer the live runtime state; fall back to the committed seed ONLY when the
+// runtime file is genuinely absent (404). A present-but-malformed progress.json
+// must fail visibly rather than silently showing stale template data.
+async function loadState(){
+  const r = await fetch(bust('progress.json'), {cache:'no-store'});
+  if (r.status === 404){
+    const s = await fetch(bust('progress.seed.json'), {cache:'no-store'});
+    if (!s.ok) throw new Error('no progress.json (404) and no seed (' + s.status + ')');
+    return { data: await s.json(), source: 'seed' };
+  }
+  if (!r.ok) throw new Error('progress.json HTTP ' + r.status);
+  const text = await r.text();
+  let data;
+  try { data = JSON.parse(text); }
+  catch (e){ const err = new Error('progress.json is not valid JSON — ' + e.message); err.malformed = true; throw err; }
+  return { data, source: 'live' };
+}
+async function fetchText(url){ const r = await fetch(bust(url), {cache:'no-store'}); if(!r.ok) return ''; return r.text(); }
+
+function card(k, v, cls){ return `<div class="card"><div class="k">${esc(k)}</div><div class="v ${cls||''}">${v}</div></div>`; }
+function flag(v){ return v==null ? '<span class="dim">—</span>' : (v ? '<span class="ok">yes</span>' : '<span class="warn">no</span>'); }
+// Array guards: a wrong-typed field (e.g. progress-log --merge replacing an array with an
+// object) or a null/primitive element must not throw and blank the board. asObjArr is for
+// arrays whose elements are dereferenced (m.id, x.who, r.name); asArr for string arrays.
+const asArr = v => Array.isArray(v) ? v : [];
+const asObjArr = v => asArr(v).filter(x => x && typeof x === 'object' && !Array.isArray(x));
+
+function render(d, source){
+  const title = d.meta?.title || 'Project completion loop';
+  $('title').textContent = title;
+  document.title = title + ' · live progress';
+  $('status').textContent = d.meta?.status || '—';
+  $('src').textContent = source === 'seed' ? 'seed / template' : 'live';
+  $('src').className = 'srcbadge ' + (source === 'seed' ? 'src-seed' : 'src-live');
+  $('genat').textContent = d.meta?.generatedAt ? ('updated ' + d.meta.generatedAt) : 'not yet generated';
+  $('phaseline').textContent = d.overall?.phase || '';
+  const pct = Math.max(0, Math.min(100, Number(d.overall?.completionPct)||0));
+  $('barfill').style.width = pct + '%';
+  $('pct').textContent = pct;
+  $('curmilestone').textContent = d.overall?.currentMilestone || '';
+  $('summary').textContent = d.overall?.summary || '';
+
+  const p = d.position||{}, t = d.tests||{}, b = d.build||{}, sec = d.security||{}, dep = d.deployment||{}, ad = d.aiDebate||{};
+  const prUrlSafe = safeUrl(p.prUrl);
+  const prCell = p.pr ? (prUrlSafe ? `<a href="${esc(prUrlSafe)}">#${esc(p.pr)}</a>` : '#'+esc(p.pr)) : '<span class="dim">none</span>';
+  const testCell = (t.passed!=null&&t.total!=null)
+    ? `<span class="${t.passed===t.total?'ok':'warn'}">${esc(t.passed)}/${esc(t.total)}</span> <span class="sub">${esc(t.lastRun||'')}</span>`
+    : `<span class="dim">${esc(t.lastRun||'—')}</span>`;
+  const depVerified = dep.verified===true ? '<span class="ok">verified</span>' : '<span class="warn">claimed — unverified</span>';
+  const depUrlSafe = safeUrl(dep.url);
+  $('cards').innerHTML =
+    card('Current position', `<span class="mono">${esc(p.repo)}</span> · <span class="mono">${esc(p.branch)}</span><br><span class="sub mono">@ ${esc(p.sha)}</span> · issue ${p.issue?('#'+esc(p.issue)):'<span class="dim">—</span>'} · PR ${prCell}`)
+  + card('Tests · '+(t.command||''), testCell)
+  + card('Build', `typecheck ${esc(b.typecheck||'—')} · lint ${esc(b.lint||'—')}<br><span class="sub">build: ${esc(b.status||'—')}</span>`)
+  + card('Security', `secret-scan: ${esc(sec.secretScan||'—')} · audit: ${esc(sec.audit||'—')}<br><span class="sub">new deps: ${esc(sec.newDeps||'—')}</span>`)
+  + card('Deployment', `${esc(dep.env||'—')} · ${esc(dep.status||'—')} · ${depVerified}<br><span class="sub">prod <span class="mono">${esc(dep.prodSha||'—')}</span>${dep.deployId?(' · deploy '+esc(dep.deployId)):''}</span>${dep.url?(`<br><span class="sub">${depUrlSafe?`<a href="${esc(depUrlSafe)}">${esc(dep.url)}</a>`:esc(dep.url)}</span>`):''}`)
+  + card('/ai-debate', `<b class="${ad.state==='consensus'?'ok':(ad.state==='running'?'warn':'dim')}">${esc(ad.state||'—')}</b>${ad.consensus?('<br><span class="sub">'+esc(ad.consensus)+'</span>'):''}${ad.unresolved?('<br><span class="warn sub">unresolved: '+esc(ad.unresolved)+'</span>'):''}${ad.room?('<br><span class="sub mono">'+esc(ad.room)+'</span>'):''}`);
+
+  $('milestones').innerHTML = asObjArr(d.milestones).map(m =>
+    `<div class="row"><span><span class="mono">${esc(m.id)}</span> ${esc(m.title)}${m.repo?(' <span class="sub">('+esc(m.repo)+')</span>'):''}${m.blockedBy?('<br><span class="sub warn">⛔ '+esc(m.blockedBy)+'</span>'):''}</span><span class="pill p-${esc(m.status)}">${esc(String(m.status||'').replace('_',' '))}</span></div>`
+  ).join('') || '<span class="dim">none — run init to populate</span>';
+
+  $('blockers').innerHTML = asObjArr(d.blockers).map(x =>
+    `<div class="row"><span><b class="warn">${esc(x.who)}</b> — ${esc(x.what)}</span><span class="sub mono">${esc(x.ref||'')}</span></div>`
+  ).join('') || '<span class="ok">none</span>';
+
+  $('nowcard').innerHTML =
+    `<div class="k">Completed</div><ul>${asArr(d.completed).map(x=>`<li>${esc(x)}</li>`).join('')||'<li class="dim">—</li>'}</ul>`
+  + `<div class="k">In progress</div><ul>${asArr(d.inProgress).map(x=>`<li class="ok">${esc(x)}</li>`).join('')||'<li class="dim">—</li>'}</ul>`
+  + `<div class="k">Next best action</div><div class="v">${esc(d.next||'—')}</div>`;
+
+  $('repos').innerHTML = asObjArr(d.repos).map(r =>
+    `<div class="row"><span><span class="mono">${esc(r.name)}</span> <span class="sub mono">${esc(r.branch)}@${esc(r.sha)}</span>${r.owner?(' <span class="sub">· '+esc(r.owner)+'</span>'):''}</span><span class="pill ${r.clean?'p-done':'p-blocked'}">${r.clean?'clean':'dirty'}</span></div>`
+    + `<div class="sub" style="padding-bottom:4px">issues ${esc(r.openIssues)} · PRs ${esc(r.openPRs)}${r.note?(' · '+esc(r.note)):''}</div>`
+  ).join('') || '<span class="dim">none</span>';
+}
+
+function renderFeed(lines){
+  const evs = lines.map(l=>{ try{return JSON.parse(l)}catch(e){return null} }).filter(Boolean).reverse();
+  $('evcount').textContent = '('+evs.length+')';
+  // Coerce every field: the feed is a plain append-only file other tools/humans
+  // write, so a parseable event with a numeric ts/kind must render, not throw.
+  $('feed').innerHTML = evs.map(e => {
+    const ts = String(e.ts==null?'':e.ts).replace('T',' ').replace(/\+.*|Z/,'').slice(5,16);
+    const kind = String(e.kind==null?'info':e.kind).toLowerCase();
+    return `<div class="ev"><span class="t mono">${esc(ts)}</span><span class="b b-${esc(kind)}">${esc(kind.toUpperCase())}</span><span>${esc(e.msg)}</span></div>`;
+  }).join('') || '<div class="ev dim">no events yet</div>';
+}
+
+async function tick(){
+  try{
+    const { data, source } = await loadState();
+    render(data, source);
+    $('banner').style.display = 'none';
+    const txt = await fetchText('events.jsonl');
+    renderFeed(txt.split('\n').filter(x=>x.trim()));
+    $('foot').classList.remove('bad');
+    $('foot').textContent = 'auto-refreshing every 5s · ' + (source==='seed' ? 'showing committed seed (no live progress.json yet)' : 'live progress.json + events.jsonl');
+  }catch(e){
+    // Malformed live state is loud on purpose — a silent fallback would hide a broken write.
+    $('banner').style.display = 'block';
+    $('banner').textContent = (e.malformed ? '⚠ ' : '✗ ') + e.message;
+    $('foot').textContent = 'error loading progress data';
+    $('foot').classList.add('bad');
+  }
+}
+tick(); setInterval(tick, 5000);
+</script>
+</body>
+</html>
