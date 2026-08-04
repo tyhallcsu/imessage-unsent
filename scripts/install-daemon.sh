@@ -27,7 +27,10 @@ fi
 BIN_DEST="$HOME/Library/Application Support/imessage-unsent/bin/imu-watcher"
 SCRIPTS_DEST="$HOME/Library/Application Support/imessage-unsent/scripts"
 PLIST_DEST="$HOME/Library/LaunchAgents/com.imu.watcher.plist"
-LOG_PATH="$HOME/Library/Logs/imessage-unsent/watcher.log"
+# The daemon writes its own structured, redacted, rotated log to watcher.log
+# (#174). launchd's stdout/stderr get a separate file so the two writers never
+# share a descriptor — that shared fd is what made rotation impossible before.
+LOG_PATH="$HOME/Library/Logs/imessage-unsent/watcher.err.log"
 
 if [[ "$BUILD_FROM_SOURCE" == "1" ]]; then
   swift build --package-path "$ROOT/daemon" -c release

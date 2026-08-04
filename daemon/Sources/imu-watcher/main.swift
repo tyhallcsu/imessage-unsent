@@ -27,6 +27,7 @@ final class WatcherDaemon {
   private var notifier: RecoveryNotifier?
   private var controlServer: ControlServer?
   /// From config (`monitoring_grace_seconds`); how far back a fresh install looks (#160).
+  private var daemonLog: DaemonLog?
   private var monitoringGraceWindow: TimeInterval = RetractionDetector.defaultMonitoringGraceWindow
   private var lastWalSize: Int64 = 0
   private var stopped = false
@@ -50,6 +51,11 @@ final class WatcherDaemon {
     let configURL = defaultConfigURL()
     let config = try ConfigStore(url: configURL).load()
     monitoringGraceWindow = TimeInterval(config.monitoringGraceSeconds)
+    daemonLog = DaemonLog(
+      fileURL: defaultDaemonLogURL(),
+      saltURL: expandTilde(config.dataDir)
+        .appendingPathComponent("log-salt", isDirectory: false)
+    )
     let dataDir = expandTilde(config.dataDir)
     try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dataDir.path)
@@ -320,9 +326,15 @@ final class WatcherDaemon {
   }
 
   private func log(_ message: String) {
-    let timestamp = ISO8601DateFormatter().string(from: Date())
-    print("[\(timestamp)] \(message)")
-    fflush(stdout)
+    // Redacts handles and rotates by size; see DaemonLog (#174). Falls back to a
+    // bare print if the log could not be constructed, so a logging problem never
+    // silences the daemon.
+    if let daemonLog {
+      daemonLog.write(message)
+    } else {
+      print("[\(ISO8601DateFormatter().string(from: Date()))] \(message)")
+      fflush(stdout)
+    }
   }
 }
 
