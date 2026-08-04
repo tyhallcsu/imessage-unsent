@@ -25,15 +25,23 @@ jobs:
       - name: Run actionlint
         # Run as a container rather than via the `rhysd/actionlint` action: that
         # would be this repo's first third-party action, which zizmor.yml requires
-        # to be hash-pinned, for no gain over `docker run`. Pinned to an exact
-        # version tag (not `latest`) so a linter upgrade is a visible commit.
+        # to be hash-pinned, for no gain over `docker run`.
+        #
+        # Pinned by DIGEST, not by tag. A Docker tag is mutable — `1.7.7` can be
+        # re-pushed — so a tag alone would leave the linter that guards every
+        # other workflow silently swappable. The digest makes an upgrade a real
+        # commit. Mounted read-only: actionlint only reads.
         run: |
-          docker run --rm -v "$PWD:/repo" --workdir /repo \
-            rhysd/actionlint:1.7.7 -color
+          docker run --rm -v "$PWD:/repo:ro" --workdir /repo \
+            rhysd/actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 \
+            -color
 
       - name: Run zizmor
+        # Version-pinned for the same reason: a bare `pipx run zizmor` installs
+        # whatever is latest, so a new release could change findings or config
+        # semantics and break CI with no commit to point at.
         run: |
-          pipx run zizmor --config zizmor.yml .github/workflows/
+          pipx run zizmor==1.29.0 --config zizmor.yml .github/workflows/
 
   shellcheck:
     name: Shellcheck (all shell sources)
