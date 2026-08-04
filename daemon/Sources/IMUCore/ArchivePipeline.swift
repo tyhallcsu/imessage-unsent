@@ -493,16 +493,10 @@ public struct ArchiveRecovery: Codable, Equatable {
 }
 
 private func recoveryJSONHasText(_ data: Data) -> Bool {
-  guard
-    let object = try? JSONSerialization.jsonObject(with: data),
-    let payload = object as? [String: Any],
-    let recovered = payload["recovered"] as? [String: Any],
-    let text = recovered["text_b64"] as? String
-  else {
-    return false
-  }
-
-  return !text.isEmpty
+  // Was `!text.isEmpty` on the raw Base64 string, which reported undecodable
+  // garbage as a successful recovery — success notification, retry button
+  // hidden, nothing readable in the archive (#172).
+  RecoveredText.isPresent(inRecoveryJSON: data)
 }
 
 /// The `failure_category` string exactly as recover.sh wrote it, before it is

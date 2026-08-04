@@ -141,12 +141,9 @@ public struct ArchiveHistoryReader {
 
     if let recoveryData = try? Data(contentsOf: recoveryURL) {
       if let payload = try? JSONDecoder().decode(RecoveryFileDTO.self, from: recoveryData) {
-        if
-          let textB64 = payload.recovered?.textB64,
-          let data = Data(base64Encoded: textB64),
-          let decoded = String(data: data, encoding: .utf8),
-          !decoded.isEmpty
-        {
+        // This site already validated correctly; it is now the shared predicate
+        // so the manifest, the compactor and this list cannot drift apart (#172).
+        if let decoded = RecoveredText.decode(fromRecoveryJSON: recoveryData) {
           text = decoded
           recovered = true
         }
