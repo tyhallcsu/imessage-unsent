@@ -1,6 +1,6 @@
 import Foundation
 
-public let imuDaemonVersion = "0.6.1"
+public let imuDaemonVersion = "0.6.2"
 
 /// Returns the user's home directory honoring the `HOME` environment variable
 /// when present. `FileManager.default.homeDirectoryForCurrentUser` reads from
