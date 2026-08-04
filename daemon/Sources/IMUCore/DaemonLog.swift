@@ -27,6 +27,7 @@ public final class DaemonLog {
   private let redact: Bool
   private let queue = DispatchQueue(label: "com.imu.watcher.log")
   private lazy var salt: Data = Self.loadOrCreateSalt(at: saltURL)
+  private var enforcedMode = false
 
   public init(
     fileURL: URL,
@@ -138,6 +139,18 @@ public final class DaemonLog {
       )
       fm.createFile(atPath: fileURL.path, contents: nil)
       try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+      enforcedMode = true
+    } else if !enforcedMode {
+      // Setting the mode only on create left every EXISTING install world-readable:
+      // launchd made this file 0644 long before the daemon owned it, and creating-
+      // only meant we inherited that forever. Measured 0644 on a real upgrade.
+      // Once per process is enough — we hold the file for the daemon's lifetime.
+      let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
+      let mode = (attrs?[.posixPermissions] as? NSNumber)?.intValue
+      if mode != 0o600 {
+        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+      }
+      enforcedMode = true
     }
     guard let handle = try? FileHandle(forWritingTo: fileURL) else { return }
     defer { try? handle.close() }
