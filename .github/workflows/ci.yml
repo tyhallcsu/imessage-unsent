@@ -10,11 +10,54 @@ permissions:
   contents: read
 
 jobs:
+  # Workflows are the one place in this repo with no other gate: shellcheck skips
+  # them, and a broken `${{ }}` or a bad `needs:` only surfaces on the run that
+  # was supposed to cut a release. actionlint catches the syntax/expression class;
+  # zizmor catches the security class (see zizmor.yml for the pinning policy).
+  workflow-lint:
+    name: Workflow lint (actionlint + zizmor)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run actionlint
+        # Run as a container rather than via the `rhysd/actionlint` action: that
+        # would be this repo's first third-party action, which zizmor.yml requires
+        # to be hash-pinned, for no gain over `docker run`.
+        #
+        # Pinned by DIGEST, not by tag. A Docker tag is mutable — `1.7.7` can be
+        # re-pushed — so a tag alone would leave the linter that guards every
+        # other workflow silently swappable. The digest makes an upgrade a real
+        # commit. Mounted read-only: actionlint only reads.
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" --workdir /repo \
+            rhysd/actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 \
+            -color
+
+      - name: Run zizmor
+        # Version-pinned for the same reason: a bare `pipx run zizmor` installs
+        # whatever is latest, so a new release could change findings or config
+        # semantics and break CI with no commit to point at.
+        #
+        # `--offline` so a blocking gate cannot go red because the GitHub API had
+        # a bad minute. It is also the mode this baseline was verified in — the
+        # online audits (ref-confusion, impostor-commit, known-vulnerable-actions)
+        # have never been run against this repo, so enabling them here would ship
+        # an unverified gate. Tracked as a follow-up: those audits are the natural
+        # compensating control for the `actions/*: ref-pin` policy in zizmor.yml,
+        # and are worth turning on once someone can baseline them.
+        run: |
+          pipx run zizmor==1.29.0 --offline --config zizmor.yml .github/workflows/
+
   shellcheck:
     name: Shellcheck (all shell sources)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install shellcheck
         run: |
           sudo apt-get update -y
@@ -27,6 +70,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -40,6 +85,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -55,6 +102,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Cache Homebrew bottles
         uses: actions/cache@v4
         with:
@@ -81,6 +130,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Cache daemon .build
         uses: actions/cache@v4
         with:
@@ -98,6 +149,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Cache gui .build
         uses: actions/cache@v4
         with:
@@ -115,6 +168,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Verify README internal links resolve
         run: |
           # crude check: every [..](path) where path starts with ./ or no scheme should exist
