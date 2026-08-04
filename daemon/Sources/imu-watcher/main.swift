@@ -64,13 +64,17 @@ final class WatcherDaemon {
       throw WatcherDaemonError.alreadyRunning(lockURL.path)
     }
     let archivesDir = dataDir.appendingPathComponent("archives", isDirectory: true)
+    notifier = RecoveryNotifier(config: config.notifications)
+    // Construct the snapshotter FIRST: the pipeline owns the copy-into-archive
+    // step now, so it needs the buffer at construction time (#169).
+    let snapshotter = WALSnapshotter(
+      storeDir: dataDir.appendingPathComponent("wal-history", isDirectory: true)
+    )
+    walSnapshotter = snapshotter
     archivePipeline = ArchivePipeline(
       archivesDir: archivesDir,
-      retentionLimit: config.archiveRetention
-    )
-    notifier = RecoveryNotifier(config: config.notifications)
-    walSnapshotter = WALSnapshotter(
-      storeDir: dataDir.appendingPathComponent("wal-history", isDirectory: true)
+      retentionLimit: config.archiveRetention,
+      walSnapshotter: snapshotter
     )
 
     statusBoard.recordStart()
@@ -267,22 +271,9 @@ final class WatcherDaemon {
             "handle=\(event.handle) edited_at=\(event.editedAt)"
         )
         do {
+          // ArchivePipeline copies the rolling WAL buffer into the archive
+          // itself, before it runs recover.sh (#67 / #169).
           let complete = try archivePipeline.archive(event: event)
-          // Copy the rolling WAL buffer into the archive's wal-history/ (#67).
-          // NOTE (#169): this runs AFTER archive() has already invoked
-          // recover.sh, so the script's wal-history scan never sees it. The
-          // copy is still worth doing — a manual recover.sh against the archive
-          // or an iPhone-backup retry can use it — but it does not help the run
-          // above, which is the ordering defect #169 fixes.
-          let walHistoryDest = complete.archiveDir.appendingPathComponent(
-            "wal-history",
-            isDirectory: true
-          )
-          do {
-            try walSnapshotter?.archiveTo(walHistoryDest)
-          } catch {
-            log("wal-history archive error=\(error.localizedDescription)")
-          }
           log("recovery complete archive_dir=\(complete.archiveDir.path) recovered=\(complete.recovered)")
           do {
             if complete.recovered {
