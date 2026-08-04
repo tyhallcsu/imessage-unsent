@@ -384,6 +384,9 @@ public final class ControlServer {
       case .archiveNotFound: code = "not_found"
       case .alreadyCompacted: code = "already_compacted"
       case .manifestUnreadable, .recoveryUnreadable: code = "bad_request"
+      // Distinct code: this is not a malformed request, it is a refusal to
+      // destroy the only copy of something. A client shouldn't retry it as-is (#172).
+      case .noRecoveredText: code = "no_recovered_text"
       case .writeFailed: code = "internal_error"
       }
       return makeError(code: code, message: error.localizedDescription)

@@ -4,6 +4,7 @@ public enum ArchiveCompactionError: Error, LocalizedError {
   case archiveNotFound(String)
   case manifestUnreadable(String)
   case recoveryUnreadable(String)
+  case noRecoveredText(String)
   case alreadyCompacted(String)
   case writeFailed(String)
 
@@ -13,6 +14,10 @@ public enum ArchiveCompactionError: Error, LocalizedError {
       return "archive directory not found: \(path)"
     case let .manifestUnreadable(reason):
       return "manifest.json could not be read: \(reason)"
+    case let .noRecoveredText(path):
+      return "\(path) holds no decodable recovered text; compacting would delete the "
+        + "chat.db snapshot that is the only remaining source. Use force to reclaim the "
+        + "space anyway."
     case let .recoveryUnreadable(reason):
       return "recovery.json could not be read or is empty — refusing to compact: \(reason)"
     case let .alreadyCompacted(name):
@@ -47,12 +52,16 @@ public enum ArchiveCompactor {
 
   /// Drop the chat.db family + WAL history snapshots from a `live` archive,
   /// preserving the recovered text and metadata. Sets `compaction_state =
-  /// "compacted"` on the manifest. Refuses to operate if `recovery.json` is
-  /// missing or unparseable so we never lose the recovered text without
-  /// confirmation.
+  /// "compacted"` on the manifest.
+  ///
+  /// Refuses unless `recovery.json` holds **decodable** recovered text — valid
+  /// Base64, valid UTF-8, non-empty — because this deletes the only remaining
+  /// source of that text. `force: true` overrides for the deliberate "reclaim
+  /// space from a failed archive" case (#172).
   @discardableResult
   public static func compact(
     archiveDir: URL,
+    force: Bool = false,
     fileManager: FileManager = .default,
     now: Date = Date()
   ) throws -> ArchiveCompactionResult {
@@ -75,8 +84,19 @@ public enum ArchiveCompactor {
     }
 
     let recoveryURL = archiveDir.appendingPathComponent("recovery.json", isDirectory: false)
-    guard let recoveryData = try? Data(contentsOf: recoveryURL), !recoveryData.isEmpty else {
+    guard let recoveryData = try? Data(contentsOf: recoveryURL) else {
       throw ArchiveCompactionError.recoveryUnreadable(recoveryURL.path)
+    }
+    // Readable-and-non-empty was never enough: this deletes the chat.db family
+    // and wal-history, which are the only remaining sources once the live WAL
+    // has checkpointed. A truncated write or a `{"schema_version":1}` stub used
+    // to sail through and take the evidence with it (#172).
+    //
+    // `force` exists for the deliberate "reclaim space from an archive that
+    // recovered nothing" case, which is a different intent from "the text is
+    // safely captured, drop the bulk" and must be spelled differently.
+    if !force, !RecoveredText.isPresent(inRecoveryJSON: recoveryData) {
+      throw ArchiveCompactionError.noRecoveredText(recoveryURL.path)
     }
 
     var bytesReclaimed: Int64 = 0
