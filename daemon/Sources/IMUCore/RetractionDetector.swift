@@ -11,18 +11,26 @@ public struct RetractionDetected: Equatable {
   /// columns. `nil` means "we don't know", never "it wasn't read".
   public let readContext: RetractionReadContext?
 
+  /// True when this retraction happened before the daemon began watching — it
+  /// can only ever be a grace-window candidate. Recovery is still attempted
+  /// (the page may still be in the live WAL), but a failure means "we weren't
+  /// there", not "we lost the race" (issue #160).
+  public let precedesMonitoring: Bool
+
   public init(
     rowid: Int64,
     guid: String,
     handle: String,
     editedAt: Int64,
-    readContext: RetractionReadContext? = nil
+    readContext: RetractionReadContext? = nil,
+    precedesMonitoring: Bool = false
   ) {
     self.rowid = rowid
     self.guid = guid
     self.handle = handle
     self.editedAt = editedAt
     self.readContext = readContext
+    self.precedesMonitoring = precedesMonitoring
   }
 }
 
@@ -55,6 +63,22 @@ public struct DetectorState: Codable, Equatable {
   }
 }
 
+/// Where a loaded `DetectorState` came from. `missing` and `corrupt` both yield a
+/// zeroed state, and a zeroed high-water mark means "every retraction ever recorded"
+/// — so both must be seeded, not just the missing-file case (issue #160).
+public enum DetectorStateOrigin: String, Equatable, Sendable {
+  case existing
+  case missing
+  case corrupt
+}
+
+public struct LoadedDetectorState: Equatable {
+  public let state: DetectorState
+  public let origin: DetectorStateOrigin
+
+  public var isFresh: Bool { origin != .existing }
+}
+
 public struct DetectorStateStore {
   public let url: URL
   private let logger: ((String) -> Void)?
@@ -83,16 +107,23 @@ public struct DetectorStateStore {
   /// the acceptable cost; archive-dir naming keeps any re-archived events
   /// distinguishable.
   public func load() throws -> DetectorState {
+    try loadWithOrigin().state
+  }
+
+  public func loadWithOrigin() throws -> LoadedDetectorState {
     guard FileManager.default.fileExists(atPath: url.path) else {
-      return DetectorState()
+      return LoadedDetectorState(state: DetectorState(), origin: .missing)
     }
 
     let data = try Data(contentsOf: url)
     do {
-      return try JSONDecoder().decode(DetectorState.self, from: data)
+      return LoadedDetectorState(
+        state: try JSONDecoder().decode(DetectorState.self, from: data),
+        origin: .existing
+      )
     } catch {
       quarantineCorruptState(decodeError: error)
-      return DetectorState()
+      return LoadedDetectorState(state: DetectorState(), origin: .corrupt)
     }
   }
 
@@ -155,6 +186,17 @@ public enum RetractionDetectorError: Error, LocalizedError {
 }
 
 public final class RetractionDetector {
+  /// How far back a fresh install looks. Zero would mean "every retraction ever
+  /// recorded": on a real 412k-message database that produced 243 archives in 111
+  /// seconds, each cloning a ~900 MB chat.db, and recovered exactly nothing —
+  /// their WAL pages had been checkpointed away years earlier (issue #160).
+  ///
+  /// It is not zero either, because the realistic install sequence is "someone sees
+  /// a message get unsent, THEN installs this" — starting at exactly now would skip
+  /// the one event they installed for. Five minutes matches `WALSnapshotter`'s own
+  /// rolling-buffer window, i.e. the horizon within which recovery has any chance.
+  public static let defaultMonitoringGraceWindow: TimeInterval = 300
+
   public static let defaultMaxAttempts = 3
   public static let defaultMaxProcessedGUIDs = 5_000
   public static let defaultMaxAttemptCounts = 1_000
@@ -166,19 +208,49 @@ public final class RetractionDetector {
   private let maxAttemptCounts: Int
   private var state: DetectorState
 
+  /// Apple-epoch ns at which this process began watching. Retractions older than
+  /// this were not witnessed live, so a failure on them is `predatesMonitoring`
+  /// rather than `walCheckpointed`.
+  public let monitoringStartedAt: Int64
+
+  /// Whether this launch seeded a fresh baseline (no state, or corrupt state).
+  public let didSeedFreshState: Bool
+
   public init(
     chatDBURL: URL = defaultMessagesChatDBURL(),
     stateStore: DetectorStateStore = DetectorStateStore(),
     maxAttempts: Int = RetractionDetector.defaultMaxAttempts,
     maxProcessedGUIDs: Int = RetractionDetector.defaultMaxProcessedGUIDs,
-    maxAttemptCounts: Int = RetractionDetector.defaultMaxAttemptCounts
+    maxAttemptCounts: Int = RetractionDetector.defaultMaxAttemptCounts,
+    monitoringGraceWindow: TimeInterval = RetractionDetector.defaultMonitoringGraceWindow,
+    now: () -> Date = Date.init
   ) throws {
     self.chatDBURL = chatDBURL
     self.stateStore = stateStore
     self.maxAttempts = maxAttempts
     self.maxProcessedGUIDs = maxProcessedGUIDs
     self.maxAttemptCounts = maxAttemptCounts
-    self.state = try stateStore.load()
+
+    let startedAt = now()
+    self.monitoringStartedAt = appleEpochNanoseconds(from: startedAt)
+
+    let loaded = try stateStore.loadWithOrigin()
+    self.state = loaded.state
+    self.didSeedFreshState = loaded.isFresh
+
+    if loaded.isFresh {
+      // A zeroed high-water mark means "every retraction ever". Seed it, and
+      // persist BEFORE the first detect(): `markProcessed` returns early when
+      // there are no events, so a quiet first launch would otherwise never write
+      // state and every restart would re-baseline (issue #160).
+      // Clamped at 0: a grace window larger than the age of the database seeds
+      // to 0, which is the old "every retraction ever" behaviour. That makes the
+      // knob continuous — a bigger number looks further back, with no sentinel.
+      self.state.lastSeenDateEdited = max(0, appleEpochNanoseconds(
+        from: startedAt.addingTimeInterval(-monitoringGraceWindow)
+      ))
+      try stateStore.save(self.state)
+    }
   }
 
   public func detect() throws -> [RetractionDetected] {
@@ -414,7 +486,8 @@ public final class RetractionDetector {
           guid: guid,
           handle: handle,
           editedAt: editedAt,
-          readContext: readContext
+          readContext: readContext,
+          precedesMonitoring: editedAt < monitoringStartedAt
         )
       )
     }

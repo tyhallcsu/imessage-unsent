@@ -26,6 +26,8 @@ final class WatcherDaemon {
   private var archivePipeline: ArchivePipeline?
   private var notifier: RecoveryNotifier?
   private var controlServer: ControlServer?
+  /// From config (`monitoring_grace_seconds`); how far back a fresh install looks (#160).
+  private var monitoringGraceWindow: TimeInterval = RetractionDetector.defaultMonitoringGraceWindow
   private var lastWalSize: Int64 = 0
   private var stopped = false
   // Detection + archiving run here, NOT on the FSWatcher queue (#143): a
@@ -47,6 +49,7 @@ final class WatcherDaemon {
 
     let configURL = defaultConfigURL()
     let config = try ConfigStore(url: configURL).load()
+    monitoringGraceWindow = TimeInterval(config.monitoringGraceSeconds)
     let dataDir = expandTilde(config.dataDir)
     try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dataDir.path)
@@ -161,7 +164,8 @@ final class WatcherDaemon {
     // into the daemon log so a reset is visible rather than silent.
     detector = try RetractionDetector(
       chatDBURL: chatDBURL,
-      stateStore: DetectorStateStore(logger: { [weak self] in self?.log($0) })
+      stateStore: DetectorStateStore(logger: { [weak self] in self?.log($0) }),
+      monitoringGraceWindow: monitoringGraceWindow
     )
     lastWalSize = FSWatcher.fileSize(at: walURL)
     let watcher = FSWatcher(walURL: walURL) { [weak self] size in

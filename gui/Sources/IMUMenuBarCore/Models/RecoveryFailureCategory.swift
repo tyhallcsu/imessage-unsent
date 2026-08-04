@@ -10,6 +10,12 @@ public enum RecoveryFailureCategory: String, Codable, Equatable, CaseIterable {
   case unknownHandle = "unknown_handle"
   case notInLocalWAL = "not_in_local_wal"
   case attachmentOnly = "attachment_only"
+  /// The retraction happened before this daemon began watching — typically the
+  /// first launch after install, or the first tick after state was reset. We were
+  /// not there when the pre-retract page was written, so no local forensics could
+  /// have recovered it. Distinct from `walCheckpointed`, which means we WERE
+  /// watching and lost the race (issue #160).
+  case predatesMonitoring = "predates_monitoring"
   case scriptError = "script_error"
   case unknown
 
@@ -23,6 +29,8 @@ public enum RecoveryFailureCategory: String, Codable, Equatable, CaseIterable {
       return "This unsend never reached your device's local WAL."
     case .attachmentOnly:
       return "The original message was attachment-only — no text body to recover."
+    case .predatesMonitoring:
+      return "This unsend happened before the daemon started watching, so there was nothing to catch."
     case .scriptError:
       return "The recovery script failed before producing output."
     case .unknown:
@@ -40,6 +48,8 @@ public enum RecoveryFailureCategory: String, Codable, Equatable, CaseIterable {
       return "Common for group-chat retractions where the remote retract didn't propagate. Nothing recoverable on this device."
     case .attachmentOnly:
       return "Attachment recovery is tracked separately — see the Limitations section in README."
+    case .predatesMonitoring:
+      return "Not a failure — recovery only works for unsends that happen while the daemon is running. Nothing to do."
     case .scriptError:
       return "Please file a bug with the contents of recovery.stderr.txt from the archive directory."
     case .unknown:

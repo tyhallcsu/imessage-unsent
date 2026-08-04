@@ -37,7 +37,16 @@ final class DaemonBinaryE2ETests: XCTestCase {
     // Disable native macOS notifications — UNUserNotificationCenter throws
     // without an app bundle, which a CLI test process doesn't have.
     let configURL = fakeHome.appendingPathComponent(".config/imessage-unsent/config.toml", isDirectory: false)
-    try "[notifications]\nshow = false\n".write(to: configURL, atomically: true, encoding: .utf8)
+    // monitoring_grace_seconds = 4000000000 restores the pre-#160 "scan all history"
+    // behaviour. The fixture's retraction is dated 2026-04-04, so with the
+    // default 5-minute window this end-to-end run would correctly skip it.
+    // It doubles as the regression test for the opt-in backfill escape hatch
+    // actually being wired through config.
+    // NOTE: monitoring_grace_seconds is a TOP-LEVEL key, so it must precede the
+    // [notifications] header — inside the section the parser routes it to the
+    // notification handler and silently drops it.
+    try "monitoring_grace_seconds = 4000000000\n[notifications]\nshow = false\n"
+      .write(to: configURL, atomically: true, encoding: .utf8)
 
     try buildFixture(into: fakeHome.appendingPathComponent("Library/Messages", isDirectory: true))
   }

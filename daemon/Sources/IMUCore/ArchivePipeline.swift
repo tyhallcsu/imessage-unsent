@@ -215,7 +215,16 @@ public struct ArchivePipeline {
       try? outputData.write(to: recoveryURL, options: .atomic)
 
       let recovered = recoveryJSONHasText(outputData)
-      let failureCategory = recovered ? nil : recoveryJSONFailureCategory(outputData)
+      var failureCategory = recovered ? nil : recoveryJSONFailureCategory(outputData)
+      // A retraction that predates monitoring could never have been caught, so
+      // "wal_checkpointed" (we watched and lost the race) is the wrong story to
+      // tell. Only generic misses are reclassified — a script error is a real
+      // defect and keeps its own category (issue #160).
+      if event.precedesMonitoring,
+         let current = failureCategory,
+         current == .walCheckpointed || current == .notInLocalWAL || current == .unknown {
+        failureCategory = .predatesMonitoring
+      }
       return RecoveryRun(
         manifest: ArchiveRecovery(
           startedAt: isoString(startedAt),
