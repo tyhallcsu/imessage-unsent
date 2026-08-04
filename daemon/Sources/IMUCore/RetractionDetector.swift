@@ -191,10 +191,12 @@ public enum RetractionDetectorError: Error, LocalizedError {
 }
 
 public final class RetractionDetector {
-  /// How far back a fresh install looks. Zero would mean "every retraction ever
-  /// recorded": on a real 412k-message database that produced 243 archives in 111
-  /// seconds, each cloning a ~900 MB chat.db, and recovered exactly nothing —
-  /// their WAL pages had been checkpointed away years earlier (issue #160).
+  /// How far back a fresh install looks. A window larger than the database's age
+  /// seeds to 0, i.e. "every retraction ever recorded": on a real 412k-message
+  /// database that produced 243 archives in 111 seconds, each cloning a ~900 MB
+  /// chat.db, and recovered exactly nothing — their WAL pages had been
+  /// checkpointed away years earlier. A window of 0 is the opposite extreme:
+  /// "from this instant on" (issue #160).
   ///
   /// It is not zero either, because the realistic install sequence is "someone sees
   /// a message get unsent, THEN installs this" — starting at exactly now would skip

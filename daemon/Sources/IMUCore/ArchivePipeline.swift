@@ -212,8 +212,6 @@ public struct ArchivePipeline {
       } else {
         outputData = result.stdout
       }
-      try? outputData.write(to: recoveryURL, options: .atomic)
-
       let recovered = recoveryJSONHasText(outputData)
       var failureCategory = recovered ? nil : recoveryJSONFailureCategory(outputData)
       // For a retraction outside this launch's baseline, "wal_checkpointed" (we
@@ -229,6 +227,16 @@ public struct ArchivePipeline {
          current == .walCheckpointed || current == .unknown {
         failureCategory = .predatesMonitoring
       }
+
+      // Write recovery.json AFTER reclassifying, with the final category patched
+      // in. Every consumer — ArchiveHistoryReader, RecoveryNotifier (including the
+      // webhook payload) and the GUI's RecoveryDetailLoader — prefers
+      // recovery.json's category over the manifest's, so leaving the raw value
+      // here would have made predates_monitoring invisible everywhere the user
+      // actually looks (issue #160).
+      let finalOutput = failureCategory.map { rewriteFailureCategory(in: outputData, to: $0) }
+        ?? outputData
+      try? finalOutput.write(to: recoveryURL, options: .atomic)
       return RecoveryRun(
         manifest: ArchiveRecovery(
           startedAt: isoString(startedAt),
@@ -541,4 +549,23 @@ public func defaultRecoverScriptURL() -> URL {
   }
 
   return cwdCandidate
+}
+
+
+/// Replace `recovered.failure_category` in a recover.sh JSON payload, preserving
+/// every other field. Returns the input unchanged if it isn't the shape we expect —
+/// a malformed payload is the recovery script's problem to report, not ours to mangle.
+private func rewriteFailureCategory(in data: Data, to category: RecoveryFailureCategory) -> Data {
+  guard var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+    return data
+  }
+  var recovered = (object["recovered"] as? [String: Any]) ?? [:]
+  recovered["failure_category"] = category.rawValue
+  object["recovered"] = recovered
+  guard let rewritten = try? JSONSerialization.data(
+    withJSONObject: object, options: [.prettyPrinted, .sortedKeys]
+  ) else {
+    return data
+  }
+  return rewritten
 }

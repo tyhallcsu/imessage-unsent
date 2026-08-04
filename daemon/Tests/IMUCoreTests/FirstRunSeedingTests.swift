@@ -380,10 +380,89 @@ extension FirstRunSeedingTests {
     )
   }
 
+  /// The category as every real consumer sees it. ArchiveHistoryReader, the
+  /// notifier/webhook payload and the GUI detail loader all prefer recovery.json
+  /// over the manifest, so a reclassification that only reached the manifest was
+  /// invisible to the user (Codex [16] item 14).
+  private func recoveryJSONCategory(_ archiveDir: URL) throws -> String? {
+    let data = try Data(contentsOf: archiveDir.appendingPathComponent("recovery.json"))
+    let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let recovered = object["recovered"] as? [String: Any]
+    return recovered?["failure_category"] as? String
+  }
+
   private func manifestCategory(_ archiveDir: URL) throws -> String? {
     let data = try Data(contentsOf: archiveDir.appendingPathComponent("manifest.json"))
     let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
     let recovery = object["recovery"] as? [String: Any]
     return recovery?["failure_category"] as? String
+  }
+}
+
+
+// MARK: - The category the user actually sees (Codex [16] item 14)
+
+extension FirstRunSeedingTests {
+  func testReclassificationReachesRecoveryJSONNotJustTheManifest() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("imu-consumer-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let liveDir = root.appendingPathComponent("Messages", isDirectory: true)
+    try FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+    try Data("synthetic db".utf8)
+      .write(to: liveDir.appendingPathComponent("chat.db", isDirectory: false))
+
+    let complete = try runPipeline(
+      root: root, liveDir: liveDir, precedesMonitoring: true,
+      script: failingScript(category: "wal_checkpointed")
+    )
+
+    // Both artifacts must agree, or the History list, the notification, the
+    // webhook payload and the GUI detail pane all keep showing the old story.
+    XCTAssertEqual(try manifestCategory(complete.archiveDir), "predates_monitoring")
+    XCTAssertEqual(try recoveryJSONCategory(complete.archiveDir), "predates_monitoring")
+  }
+
+  func testRewriteLeavesEveryOtherRecoveryJSONFieldIntact() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("imu-consumer2-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let liveDir = root.appendingPathComponent("Messages", isDirectory: true)
+    try FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+    try Data("synthetic db".utf8)
+      .write(to: liveDir.appendingPathComponent("chat.db", isDirectory: false))
+
+    let complete = try runPipeline(
+      root: root, liveDir: liveDir, precedesMonitoring: true,
+      script: #"""
+      #!/usr/bin/env bash
+      echo '{"schema_version":1,"error":"kept","recovered":{"text_b64":null,"length":null,"failure_category":"wal_checkpointed"}}'
+      """#
+    )
+
+    let data = try Data(contentsOf: complete.archiveDir.appendingPathComponent("recovery.json"))
+    let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    XCTAssertEqual(object["schema_version"] as? Int, 1)
+    XCTAssertEqual(object["error"] as? String, "kept")
+    let recovered = try XCTUnwrap(object["recovered"] as? [String: Any])
+    XCTAssertEqual(recovered["failure_category"] as? String, "predates_monitoring")
+    XCTAssertTrue(recovered.keys.contains("text_b64"))
+    XCTAssertTrue(recovered.keys.contains("length"))
+  }
+
+  func testWatchedMissKeepsItsCategoryInRecoveryJSONToo() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("imu-consumer3-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let liveDir = root.appendingPathComponent("Messages", isDirectory: true)
+    try FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+    try Data("synthetic db".utf8)
+      .write(to: liveDir.appendingPathComponent("chat.db", isDirectory: false))
+
+    let complete = try runPipeline(
+      root: root, liveDir: liveDir, precedesMonitoring: false,
+      script: failingScript(category: "wal_checkpointed")
+    )
+    XCTAssertEqual(try recoveryJSONCategory(complete.archiveDir), "wal_checkpointed")
   }
 }
