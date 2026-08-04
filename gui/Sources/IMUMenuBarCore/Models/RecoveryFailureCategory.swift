@@ -13,10 +13,10 @@ public enum RecoveryFailureCategory: String, Codable, Equatable, CaseIterable {
   /// The retraction predates the monitoring baseline this launch established —
   /// a first run after install, or the first tick after state was reset (a
   /// quarantined corrupt state file also resets it, so the daemon may well have
-  /// been running before). We were not tracking the row when its pre-retract page
-  /// was written, so a miss here reflects when monitoring started, not the health
-  /// of the daemon and not proof the text was unrecoverable — an older page can
-  /// still be in the live WAL. Distinct from `walCheckpointed`, which means we
+  /// been running before — whether it was is unknown here). A miss in this
+  /// category reflects where the baseline was set, not the health of the daemon,
+  /// and is not proof the text was unrecoverable — an older page can still be in
+  /// the live WAL. Distinct from `walCheckpointed`, which means we
   /// WERE tracking and lost the race (issue #160).
   case predatesMonitoring = "predates_monitoring"
   case scriptError = "script_error"

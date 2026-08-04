@@ -13,10 +13,13 @@ public struct RetractionDetected: Equatable {
 
   /// True only when this launch seeded a FRESH baseline and the retraction predates
   /// it. After an ordinary restart with valid state, an older event is a genuine
-  /// catch-up miss and keeps its real failure category. It
-  /// can only ever be a grace-window candidate. Recovery is still attempted
-  /// (the page may still be in the live WAL), but a failure means "we weren't
-  /// there", not "we lost the race" (issue #160).
+  /// catch-up miss and keeps its real failure category.
+  ///
+  /// It says nothing about whether monitoring was active earlier — a quarantined
+  /// corrupt state resets the baseline for an installation that had been running
+  /// for months. Recovery is still attempted (the page may still be in the live
+  /// WAL); a failure just means the miss is explained by where the baseline was
+  /// set, not by losing a race we were running (issue #160).
   public let precedesMonitoring: Bool
 
   public init(
@@ -216,8 +219,9 @@ public final class RetractionDetector {
   private var state: DetectorState
 
   /// Apple-epoch ns at which this process began watching. Retractions older than
-  /// this were not witnessed live, so a failure on them is `predatesMonitoring`
-  /// rather than `walCheckpointed`.
+  /// this fall outside the baseline established by THIS launch — which is not the
+  /// same as never having been monitored, since a state reset re-establishes the
+  /// baseline for an installation that was already running.
   public let monitoringStartedAt: Int64
 
   /// Whether this launch seeded a fresh baseline (no state, or corrupt state).
