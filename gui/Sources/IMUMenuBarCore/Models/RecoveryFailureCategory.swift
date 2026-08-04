@@ -48,7 +48,7 @@ public enum RecoveryFailureCategory: String, Codable, Equatable, CaseIterable {
   public var actionableHint: String? {
     switch self {
     case .walCheckpointed:
-      return "Keep the daemon running before unsends — rolling WAL history (#67) helps for long messages."
+      return "Keep the daemon running before unsends. Rolling WAL history (#67) is captured but does not yet feed automatic recovery (#169) — it can be searched manually against the archive today."
     case .unknownHandle:
       return "This sometimes resolves itself as Messages syncs handles. Check the archive again in a few minutes."
     case .notInLocalWAL:
