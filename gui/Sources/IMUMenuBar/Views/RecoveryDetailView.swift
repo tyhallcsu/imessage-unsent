@@ -90,7 +90,11 @@ struct RecoveryDetailView: View {
     HStack(alignment: .firstTextBaseline) {
       VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 6) {
-          Text(model.contactsResolver.displayName(forHandle: entry.handle) ?? entry.handle)
+          // Daemon-resolved first: on an ad-hoc build the local CNContactStore
+          // path can never be authorised, so it would always return nil (#179).
+          Text(entry.displayName
+               ?? model.contactsResolver.displayName(forHandle: entry.handle)
+               ?? entry.handle)
             .font(.title3)
             .fontWeight(.semibold)
           if isCompacted {

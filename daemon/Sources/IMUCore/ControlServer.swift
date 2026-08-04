@@ -32,6 +32,9 @@ public final class ControlServer {
   public let socketPath: URL
   private let statusBoard: DaemonStatusBoard
   private let historyReader: ArchiveHistoryReader
+  /// Optional so tests and any caller without Full Disk Access simply get no
+  /// names rather than a failure (#179).
+  private let addressBook: AddressBookDirectory?
   private let version: String
   private let dataDir: URL
   private let notificationsShow: Bool
@@ -60,6 +63,7 @@ public final class ControlServer {
     version: String = imuDaemonVersion,
     dataDir: URL,
     notificationsShow: Bool,
+    addressBook: AddressBookDirectory? = nil,
     logger: ((String) -> Void)? = nil
   ) {
     self.socketPath = socketPath
@@ -68,6 +72,7 @@ public final class ControlServer {
     self.version = version
     self.dataDir = dataDir
     self.notificationsShow = notificationsShow
+    self.addressBook = addressBook
     self.logger = logger
   }
 
@@ -320,6 +325,9 @@ public final class ControlServer {
         "id": entry.id,
         "detected_at": entry.detectedAt,
         "handle": entry.handle,
+        // #179: the GUI cannot resolve this itself on an ad-hoc build, so the
+        // daemon — which has FDA — does it and sends the name along.
+        "display_name": (addressBook?.displayName(forHandle: entry.handle)) as Any? ?? NSNull(),
         "rowid": entry.rowid,
         "recovered": entry.recovered,
         "text": entry.text as Any? ?? NSNull(),

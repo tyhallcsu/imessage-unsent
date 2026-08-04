@@ -82,6 +82,10 @@ public struct ArchiveHistoryEntryDTO: Codable, Equatable, Identifiable {
   public let id: String
   public let detectedAt: String
   public let handle: String
+  /// Resolved by the daemon, which has Full Disk Access; the GUI cannot look this
+  /// up itself on an ad-hoc-signed build (#179). Optional — absent when the daemon
+  /// predates this, or has no address book to read.
+  public let displayName: String?
   public let rowid: Int64
   public let recovered: Bool
   public let text: String?
@@ -96,6 +100,7 @@ public struct ArchiveHistoryEntryDTO: Codable, Equatable, Identifiable {
     case id
     case detectedAt = "detected_at"
     case handle
+    case displayName = "display_name"
     case rowid
     case recovered
     case text
@@ -109,6 +114,7 @@ public struct ArchiveHistoryEntryDTO: Codable, Equatable, Identifiable {
     id: String,
     detectedAt: String,
     handle: String,
+    displayName: String? = nil,
     rowid: Int64,
     recovered: Bool,
     text: String?,
@@ -120,6 +126,7 @@ public struct ArchiveHistoryEntryDTO: Codable, Equatable, Identifiable {
     self.id = id
     self.detectedAt = detectedAt
     self.handle = handle
+    self.displayName = displayName
     self.rowid = rowid
     self.recovered = recovered
     self.text = text
@@ -134,6 +141,8 @@ public struct ArchiveHistoryEntryDTO: Codable, Equatable, Identifiable {
     self.id = try c.decode(String.self, forKey: .id)
     self.detectedAt = try c.decode(String.self, forKey: .detectedAt)
     self.handle = try c.decode(String.self, forKey: .handle)
+    // decodeIfPresent: an older daemon does not send this (#179).
+    self.displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
     self.rowid = try c.decode(Int64.self, forKey: .rowid)
     self.recovered = try c.decode(Bool.self, forKey: .recovered)
     self.text = try c.decodeIfPresent(String.self, forKey: .text)

@@ -152,7 +152,9 @@ struct HistoryWindow: View {
         } label: {
           RecoveryRowView(
             entry: entry,
-            displayName: model.contactsResolver.displayName(forHandle: entry.handle),
+            // Daemon-resolved first — see RecoveryDetailView / #179.
+            displayName: entry.displayName
+              ?? model.contactsResolver.displayName(forHandle: entry.handle),
             avatarImageData: model.contactsResolver.avatarImageData(forHandle: entry.handle),
             archiveStats: archiveStats.provider.stats(forArchiveId: entry.id)
           )
