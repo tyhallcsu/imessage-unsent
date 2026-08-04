@@ -67,8 +67,8 @@ final class AddressBookDirectoryTests: XCTestCase {
     try makeSource("src-1", rows: [("(720) 555-0123", "Ada", "Lovelace")])
     let book = AddressBookDirectory(sourcesDir: dir)
 
-    XCTAssertEqual(book.displayName(forHandle: "+17205550123"), "Ada Lovelace")
-    XCTAssertEqual(book.displayName(forHandle: "7205550123"), "Ada Lovelace")
+    XCTAssertEqual(book.displayName(forHandle: "+17205550123")?.unredacted(), "Ada Lovelace")
+    XCTAssertEqual(book.displayName(forHandle: "7205550123")?.unredacted(), "Ada Lovelace")
     XCTAssertNil(book.displayName(forHandle: "+15559998888"))
   }
 
@@ -78,8 +78,8 @@ final class AddressBookDirectoryTests: XCTestCase {
     try makeSource("src-2", rows: [("(415) 555-0199", "Grace", "Hopper")])
     let book = AddressBookDirectory(sourcesDir: dir)
 
-    XCTAssertEqual(book.displayName(forHandle: "+17205550123"), "Ada Lovelace")
-    XCTAssertEqual(book.displayName(forHandle: "+14155550199"), "Grace Hopper")
+    XCTAssertEqual(book.displayName(forHandle: "+17205550123")?.unredacted(), "Ada Lovelace")
+    XCTAssertEqual(book.displayName(forHandle: "+14155550199")?.unredacted(), "Grace Hopper")
     XCTAssertEqual(book.entryCount(), 2)
   }
 
@@ -87,7 +87,7 @@ final class AddressBookDirectoryTests: XCTestCase {
     try makeSource("src-1", rows: [("(720) 555-0123", "Ada", "Lovelace")])
     try makeSource("src-2", rows: [("(720) 555-0123", "Someone", "Else")])
     let book = AddressBookDirectory(sourcesDir: dir)
-    XCTAssertEqual(book.displayName(forHandle: "+17205550123"), "Ada Lovelace")
+    XCTAssertEqual(book.displayName(forHandle: "+17205550123")?.unredacted(), "Ada Lovelace")
   }
 
   func testMissingOrUnreadableAddressBookDegradesToNil() {
@@ -109,7 +109,7 @@ final class AddressBookDirectoryTests: XCTestCase {
     try makeSource("src-good", rows: [("(720) 555-0123", "Ada", "Lovelace")])
 
     let book = AddressBookDirectory(sourcesDir: dir)
-    XCTAssertEqual(book.displayName(forHandle: "+17205550123"), "Ada Lovelace")
+    XCTAssertEqual(book.displayName(forHandle: "+17205550123")?.unredacted(), "Ada Lovelace")
   }
 
   // MARK: - Helper
@@ -140,5 +140,60 @@ final class AddressBookDirectoryTests: XCTestCase {
     try process.run()
     process.waitUntilExit()
     XCTAssertEqual(process.terminationStatus, 0)
+  }
+}
+
+// MARK: - Names cannot be logged by accident
+
+extension AddressBookDirectoryTests {
+  /// The gap this closes: `DaemonLog` redacts phone numbers and emails by regex,
+  /// but a personal name has no shape to match, so `log("... \(name)")` would have
+  /// written it in the clear. `ContactName` makes the accidental path harmless.
+  func testInterpolatingANameYieldsNoPlaintext() {
+    let name = ContactName("Ada Lovelace")
+    XCTAssertEqual("\(name)", "<name redacted>")
+    XCTAssertEqual(String(describing: name), "<name redacted>")
+    XCTAssertEqual("resolved \(name) for handle", "resolved <name redacted> for handle")
+    XCTAssertFalse("\(name)".contains("Ada"))
+    XCTAssertFalse("\(name)".contains("Lovelace"))
+  }
+
+  func testDebugPrintingAlsoRedacts() {
+    var out = ""
+    debugPrint(ContactName("Ada Lovelace"), to: &out)
+    XCTAssertFalse(out.contains("Ada"))
+  }
+
+  func testAnOptionalNameStillRedacts() {
+    let name: ContactName? = ContactName("Ada Lovelace")
+    XCTAssertFalse("\(String(describing: name))".contains("Ada"))
+  }
+
+  func testUnredactedIsTheOnlyWayOut() {
+    XCTAssertEqual(ContactName("Ada Lovelace").unredacted(), "Ada Lovelace")
+  }
+
+  /// End to end: a resolved name interpolated into a real log line writes nothing
+  /// identifying to the file.
+  func testAResolvedNameInterpolatedIntoTheLogLeaksNothing() throws {
+    try makeSource("src-1", rows: [("(720) 555-0123", "Ada", "Lovelace")])
+    let book = AddressBookDirectory(sourcesDir: dir)
+    let name = try XCTUnwrap(book.displayName(forHandle: "+17205550123"))
+
+    let logURL = dir.appendingPathComponent("watcher.log", isDirectory: false)
+    let log = DaemonLog(
+      fileURL: logURL,
+      saltURL: dir.appendingPathComponent("log-salt", isDirectory: false)
+    )
+    // Exactly the shape a future contributor would write without thinking.
+    log.write("recovery complete handle=+17205550123 contact=\(name)")
+
+    let written = try String(contentsOf: logURL, encoding: .utf8)
+    XCTAssertFalse(written.contains("Ada"), "the name must not reach the log")
+    XCTAssertFalse(written.contains("Lovelace"))
+    XCTAssertTrue(written.contains("<name redacted>"))
+    // And the handle is still fingerprinted by the #174 scrubber.
+    XCTAssertFalse(written.contains("+17205550123"))
+    XCTAssertTrue(written.contains("h:"))
   }
 }

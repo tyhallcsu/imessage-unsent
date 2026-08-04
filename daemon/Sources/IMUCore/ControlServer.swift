@@ -327,7 +327,10 @@ public final class ControlServer {
         "handle": entry.handle,
         // #179: the GUI cannot resolve this itself on an ad-hoc build, so the
         // daemon — which has FDA — does it and sends the name along.
-        "display_name": (addressBook?.displayName(forHandle: entry.handle)) as Any? ?? NSNull(),
+        // `unredacted()` is the one sanctioned way to get the plaintext name, and
+        // this is its only caller — the GUI needs the real string to display.
+        "display_name": (addressBook?.displayName(forHandle: entry.handle)?.unredacted())
+          as Any? ?? NSNull(),
         "rowid": entry.rowid,
         "recovered": entry.recovered,
         "text": entry.text as Any? ?? NSNull(),
