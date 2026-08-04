@@ -2,6 +2,52 @@
 
 This document explains how to sign and notarize the `imu-watcher` daemon and the `iMessage Unsent.app` GUI (executable: `IMUMenuBar`) for a release. The signing pipeline is implemented by [`scripts/sign-release.sh`](../scripts/sign-release.sh) and called automatically from [`scripts/build-release.sh`](../scripts/build-release.sh) and the [`Release` workflow](../.github/workflows/release.yml).
 
+## What you need, and what a free Apple ID can do
+
+> [!IMPORTANT]
+> **Developer ID signing requires a paid Apple Developer Program membership**
+> (US$99/year). A free Apple ID cannot issue a Developer ID Application
+> certificate, and `notarytool` will not accept one. The operator steps below are
+> not merely "not done yet" on a free account — they are not possible until you
+> enrol.
+
+Run `make signing-status` at any time to see exactly where you stand. It reports
+which of the six credentials are set, which certificates are in your keychain,
+whether the tooling is present, and how the currently-installed app is signed.
+
+| | Free Apple ID | Paid membership |
+|---|---|---|
+| Apple Development certificate | ✅ create in Xcode | ✅ |
+| Developer ID Application certificate | ❌ | ✅ |
+| Notarize / staple | ❌ | ✅ |
+| Distribute without a Gatekeeper warning | ❌ | ✅ |
+| **Stable code identity for TCC (Contacts, etc.)** | ✅ **see below** | ✅ |
+
+### Free Apple ID: local signing, and why it matters
+
+The last row is not a consolation prize. An **ad-hoc** signature — what the
+released artifacts carry today — has no stable identity, so TCC has nothing to
+bind a permission to. That is the whole reason Contacts access is impossible on
+the shipped build: `requestAccess` fails closed without prompting, no TCC record
+is written, and the app never appears in Privacy → Contacts
+([#179](https://github.com/tyhallcsu/imessage-unsent/issues/179)).
+
+An **Apple Development** certificate — which a free Apple ID can create in Xcode
+— is a real certificate with a stable identity. Signing your local install with
+one lets the Contacts prompt appear and the grant stick:
+
+```bash
+make sign-local                     # lists your identities
+make sign-local IDENTITY="Apple Development: you@example.com (TEAMID)"
+```
+
+This changes nothing about distribution: released artifacts stay unsigned, other
+people still see a Gatekeeper warning, and nothing is notarized. It also does not
+survive an upgrade — `make daemon-install` and reinstalling the app replace the
+binaries with unsigned ones, so re-run it afterwards. And because Full Disk
+Access is bound to the old signature, you must re-grant it once after signing;
+the script says so when it finishes.
+
 ## Status of this scaffold
 
 | Capability | State |
@@ -9,8 +55,10 @@ This document explains how to sign and notarize the `imu-watcher` daemon and the
 | Hardened Runtime + entitlements file in repo | ✅ ([`gui/entitlements.plist`](../gui/entitlements.plist)) |
 | `scripts/sign-release.sh` — codesign + notarytool + stapler | ✅ |
 | Workflow wiring (`release.yml` reads secrets, runs sign step) | ✅ |
-| **Apple Developer ID cert provisioned and stored as secret** | ❌ — operator action below |
-| **Apple ID + App-Specific Password for notarytool** | ❌ — operator action below |
+| `make signing-status` preflight | ✅ ([`scripts/signing-status.sh`](../scripts/signing-status.sh)) |
+| `make sign-local` for a non-Developer-ID identity | ✅ ([`scripts/sign-local.sh`](../scripts/sign-local.sh)) |
+| **Apple Developer ID cert provisioned and stored as secret** | ❌ — needs a **paid** membership, then the operator steps below |
+| **Apple ID + App-Specific Password for notarytool** | ❌ — needs a **paid** membership |
 
 Until the two operator actions are completed, every release run logs `Skipping codesign + notarize: missing env vars (...)` and ships unsigned artifacts. The unsigned path is intentionally supported so forks and dry-run builds work without Apple credentials.
 

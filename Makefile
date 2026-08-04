@@ -11,7 +11,7 @@ SHELL_SOURCES := scripts/*.sh scripts/lib/*.sh script/*.sh tests/fixtures/*.sh t
 .PHONY: fixture fixture-check shellcheck python-check bats python-test test \
 	daemon-build daemon-test daemon-install daemon-uninstall \
 	gui-build gui-test gui-run swift-test \
-	doctor rc-smoke icon \
+	doctor rc-smoke icon signing-status sign-local \
 	release release-notes
 
 fixture:
@@ -73,6 +73,15 @@ swift-test: daemon-test gui-test
 # launch (FDA prompt loop, Gatekeeper) or for SSH troubleshooting. Output
 # matches the GUI's Diagnostics report so users can paste either source into a
 # GitHub issue.
+signing-status:
+	bash scripts/signing-status.sh
+
+# Sign the LOCAL install with a certificate you already have. Not Developer ID,
+# not distributable — but it gives TCC a stable identity, which is what Contacts
+# needs (#179). Run with no IDENTITY to list what is available.
+sign-local:
+	bash scripts/sign-local.sh $(if $(IDENTITY),"$(IDENTITY)",)
+
 doctor:
 	bash scripts/app_doctor.sh
 
