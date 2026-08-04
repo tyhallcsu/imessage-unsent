@@ -67,6 +67,12 @@ jobs:
         run: brew install bats-core
       - name: Build deterministic fixture
         run: make fixture
+      - name: Fixture rebuild must match the committed bytes
+        # The builder pins SQLite's version stamp (issue #165) so a rebuild is
+        # reproducible across SQLite versions. If this fails, either the
+        # committed fixture is stale or something new drifts per-machine —
+        # `git diff tests/fixtures/` shows which file.
+        run: git diff --exit-code -- tests/fixtures/
       - name: Run bats
         run: bats tests/bats
 
