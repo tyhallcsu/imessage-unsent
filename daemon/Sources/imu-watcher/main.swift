@@ -96,6 +96,7 @@ final class WatcherDaemon {
       version: imuDaemonVersion,
       dataDir: dataDir,
       notificationsShow: config.notifications.show,
+      addressBook: AddressBookDirectory(),
       logger: { [weak self] message in self?.log(message) }
     )
     try server.start()
