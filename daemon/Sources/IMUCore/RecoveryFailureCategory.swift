@@ -5,11 +5,14 @@ public enum RecoveryFailureCategory: String, Codable, Equatable, CaseIterable {
   case unknownHandle = "unknown_handle"
   case notInLocalWAL = "not_in_local_wal"
   case attachmentOnly = "attachment_only"
-  /// The retraction predates the monitoring baseline this launch established —
-  /// a launch that starts from missing or quarantined state (a corrupt state file
+  /// The retraction happened before this fresh-state launch started monitoring —
+  /// a launch that begins from missing or quarantined state (a corrupt state file
   /// is quarantined at startup, so the daemon may well have been running for
-  /// months before — whether it was is unknown here). The baseline is set when the
-  /// detector initialises, not when the file was removed. A miss in this
+  /// months before; whether it was is unknown here).
+  ///
+  /// Note this is measured against the launch instant, not against the seeded
+  /// high-water mark: the seed sits a grace window EARLIER, so an event can be
+  /// after the seed (hence detected at all) and still before monitoring started. A miss in this
   /// category reflects where the baseline was set, not the health of the daemon,
   /// and is not proof the text was unrecoverable — an older page can still be in
   /// the live WAL. Distinct from `walCheckpointed`, which means we
@@ -29,7 +32,7 @@ public enum RecoveryFailureCategory: String, Codable, Equatable, CaseIterable {
     case .attachmentOnly:
       return "The original message was attachment-only — no text body to recover."
     case .predatesMonitoring:
-      return "This unsend predates the monitoring baseline set when the daemon last started from a fresh state."
+      return "This unsend happened before the daemon last started monitoring from a fresh state."
     case .scriptError:
       return "The recovery script failed before producing output."
     case .unknown:

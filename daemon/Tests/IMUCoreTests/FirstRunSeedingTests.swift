@@ -505,6 +505,19 @@ extension FirstRunSeedingTests {
       recovered["failure_category"] as? String, "predates_monitoring",
       "the webhook ships recovery.json verbatim — a stale category would leak to subscribers"
     )
+
+    // 3. The user-visible notification text itself, which is built from the
+    // category rather than from the JSON blob.
+    // The builder renders "<displayMessage> <actionableHint>".
+    let category = RecoveryFailureCategory.predatesMonitoring
+    XCTAssertTrue(
+      notification.body.contains(category.displayMessage),
+      "the banner must say what happened, not the generic 'cause not determined'"
+    )
+    XCTAssertTrue(notification.body.contains(try XCTUnwrap(category.actionableHint)))
+    XCTAssertFalse(
+      notification.body.contains(RecoveryFailureCategory.walCheckpointed.displayMessage)
+    )
   }
 
   func testHistoryReaderKeepsWalCheckpointedForAWatchedMiss() throws {
