@@ -185,6 +185,15 @@ final class WatcherDaemon {
     if let detector, let archivePipeline {
       let walSnapshotter = self.walSnapshotter
       let notifier = self.notifier
+      // Snapshot BEFORE detecting, for the same reason handleWalChange does: the
+      // rolling buffer is what recovery falls back to when the live WAL no longer
+      // holds the pre-retract page. Skipping it here would leave the grace-window
+      // event — the one this whole pass exists for — without that fallback.
+      do {
+        _ = try walSnapshotter?.snapshot()
+      } catch {
+        log("startup wal snapshot error=\(error.localizedDescription)")
+      }
       log("startup detection pass (grace window)")
       pipelineQueue.async { [weak self] in
         self?.runDetectionPipeline(

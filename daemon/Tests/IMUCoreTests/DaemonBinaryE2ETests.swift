@@ -66,7 +66,7 @@ final class DaemonBinaryE2ETests: XCTestCase {
     fakeHome = nil
   }
 
-  func testDaemonExposesControlSocketAndArchivesRetractionAfterWalChange() throws {
+  func testDaemonArchivesAPreExistingRetractionViaTheStartupPass() throws {
     let binary = Self.packageRoot().appendingPathComponent(".build/debug/imu-watcher")
     try XCTSkipUnless(
       FileManager.default.fileExists(atPath: binary.path),
@@ -95,18 +95,22 @@ final class DaemonBinaryE2ETests: XCTestCase {
       fakeHome.appendingPathComponent("Library/Application Support/imessage-unsent").path
     )
 
+    // The startup pass must snapshot before detecting — the rolling buffer is
+    // recovery's fallback when the live WAL no longer holds the pre-retract page.
+    let walHistoryDir = fakeHome.appendingPathComponent(
+      "Library/Application Support/imessage-unsent/wal-history", isDirectory: true
+    )
+
     // Archives dir is empty until the daemon detects something.
     let archivesDir = fakeHome.appendingPathComponent(
       "Library/Application Support/imessage-unsent/archives",
       isDirectory: true
     )
 
-    // Trigger a WAL change so FSWatcher fires. The fixture already contains a
-    // retracted message (rowid 200) — first detect-after-start finds it. Use
-    // `touch` so FSEvents fires without rewriting the WAL frames that hold the
-    // pre-retraction text (any sqlite3 INSERT would close-checkpoint and lose
-    // them).
-    try touchWAL(at: fakeHome.appendingPathComponent("Library/Messages/chat.db-wal", isDirectory: false))
+    // Deliberately do NOT touch the WAL. FSWatcher records the file's signature on
+    // start() so the poll fallback cannot fire on pre-existing state, which means
+    // the startup detection pass (#160) is the ONLY path that can produce an
+    // archive here. Touching the WAL would race the two and prove neither.
 
     // Poll recent until the recovery lands and the daemon has written the
     // post-recovery manifest. Using the socket as the wait condition avoids
@@ -129,6 +133,14 @@ final class DaemonBinaryE2ETests: XCTestCase {
     XCTAssertEqual(entry["rowid"] as? Int, 200)
     XCTAssertEqual(entry["recovered"] as? Bool, true)
     XCTAssertEqual(entry["text"] as? String, "Recovered fixture message: hello WAL data!")
+
+    // The startup pass snapshots before it detects; without that the grace-window
+    // event loses the rolling-buffer fallback (Codex [26]).
+    let snapshots = (try? FileManager.default.contentsOfDirectory(atPath: walHistoryDir.path)) ?? []
+    XCTAssertFalse(
+      snapshots.isEmpty,
+      "startup detection must snapshot the WAL first: log=\n\(captureLog())"
+    )
   }
 
   // MARK: - Helpers
