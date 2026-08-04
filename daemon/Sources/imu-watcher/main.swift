@@ -185,10 +185,16 @@ final class WatcherDaemon {
     if let detector, let archivePipeline {
       let walSnapshotter = self.walSnapshotter
       let notifier = self.notifier
-      // Snapshot BEFORE detecting, for the same reason handleWalChange does: the
-      // rolling buffer is what recovery falls back to when the live WAL no longer
-      // holds the pre-retract page. Skipping it here would leave the grace-window
-      // event — the one this whole pass exists for — without that fallback.
+      // Snapshot BEFORE detecting, same order as handleWalChange, so the buffer
+      // holds the WAL as it was at startup rather than after any intervening
+      // checkpoint.
+      //
+      // Caveat worth knowing: the buffer does not currently reach recover.sh at
+      // all — it is copied into the archive AFTER archive() has already run the
+      // script (#169). So this preserves the frames for a later attempt (manual
+      // recover.sh against the archive, or the iPhone-backup retry), not for the
+      // immediate run. Once #169 lands, this ordering is what makes the buffer
+      // useful to the grace-window event.
       do {
         _ = try walSnapshotter?.snapshot()
       } catch {
