@@ -275,3 +275,114 @@ final class FirstRunSeedingTests: XCTestCase {
     XCTAssertTrue(RecoveryFailureCategory.allCases.contains(.predatesMonitoring))
   }
 }
+
+// MARK: - Reclassification boundaries (issue #160, Codex [6] item 9)
+
+extension FirstRunSeedingTests {
+  /// `predates_monitoring` must replace only the categories that mean "we didn't
+  /// see it in the WAL, cause unspecified". Every other category is a specific
+  /// finding that is true regardless of when we started watching, and silently
+  /// overwriting it would destroy the diagnosis.
+  func testOnlyGenericMissesAreReclassified() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("imu-reclass-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let liveDir = root.appendingPathComponent("Messages", isDirectory: true)
+    try FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+    try Data("synthetic db".utf8)
+      .write(to: liveDir.appendingPathComponent("chat.db", isDirectory: false))
+
+    // Categories that are specific findings, independent of monitoring start.
+    for preserved in [
+      RecoveryFailureCategory.notInLocalWAL,
+      .scriptError,
+      .unknownHandle,
+      .attachmentOnly
+    ] {
+      let complete = try runPipeline(
+        root: root, liveDir: liveDir, precedesMonitoring: true,
+        script: failingScript(category: preserved.rawValue)
+      )
+      XCTAssertEqual(
+        try manifestCategory(complete.archiveDir), preserved.rawValue,
+        "\(preserved.rawValue) is a specific diagnosis and must survive"
+      )
+    }
+
+    // The generic misses DO become predates_monitoring.
+    for generic in [RecoveryFailureCategory.walCheckpointed, .unknown] {
+      let complete = try runPipeline(
+        root: root, liveDir: liveDir, precedesMonitoring: true,
+        script: failingScript(category: generic.rawValue)
+      )
+      XCTAssertEqual(try manifestCategory(complete.archiveDir), "predates_monitoring")
+    }
+
+    // …but only when the event actually predates monitoring.
+    let watched = try runPipeline(
+      root: root, liveDir: liveDir, precedesMonitoring: false,
+      script: failingScript(category: "wal_checkpointed")
+    )
+    XCTAssertEqual(try manifestCategory(watched.archiveDir), "wal_checkpointed")
+  }
+
+  func testSuccessfulRecoveryIsNeverReclassified() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("imu-reclass-ok-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let liveDir = root.appendingPathComponent("Messages", isDirectory: true)
+    try FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+    try Data("synthetic db".utf8)
+      .write(to: liveDir.appendingPathComponent("chat.db", isDirectory: false))
+
+    // A pre-monitoring event can still succeed if the page happens to be in the
+    // live WAL — the 5-minute window is a policy bound, not a proof.
+    let complete = try runPipeline(
+      root: root, liveDir: liveDir, precedesMonitoring: true,
+      script: #"""
+      #!/usr/bin/env bash
+      echo '{"schema_version":1,"recovered":{"text_b64":"aGVsbG8="}}'
+      """#
+    )
+    XCTAssertTrue(complete.recovered)
+    XCTAssertNil(try manifestCategory(complete.archiveDir))
+  }
+
+  private func failingScript(category: String) -> String {
+    """
+    #!/usr/bin/env bash
+    echo '{"schema_version":1,"recovered":{"text_b64":null,"failure_category":"\(category)"}}'
+    """
+  }
+
+  private func runPipeline(
+    root: URL, liveDir: URL, precedesMonitoring: Bool, script: String
+  ) throws -> RecoveryComplete {
+    let scriptURL = root.appendingPathComponent("recover-\(UUID().uuidString).sh", isDirectory: false)
+    try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+    let pipeline = ArchivePipeline(
+      liveMessagesDir: liveDir,
+      archivesDir: root.appendingPathComponent("archives", isDirectory: true),
+      recoverScriptURL: scriptURL,
+      retentionLimit: 500
+    )
+    return try pipeline.archive(
+      event: RetractionDetected(
+        rowid: Int64.random(in: 1...1_000_000),
+        guid: UUID().uuidString,
+        handle: "+15550001000",
+        editedAt: 797_000_010_000_000_000,
+        precedesMonitoring: precedesMonitoring
+      )
+    )
+  }
+
+  private func manifestCategory(_ archiveDir: URL) throws -> String? {
+    let data = try Data(contentsOf: archiveDir.appendingPathComponent("manifest.json"))
+    let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let recovery = object["recovery"] as? [String: Any]
+    return recovery?["failure_category"] as? String
+  }
+}

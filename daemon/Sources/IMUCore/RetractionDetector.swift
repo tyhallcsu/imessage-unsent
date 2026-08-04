@@ -195,8 +195,13 @@ public final class RetractionDetector {
   ///
   /// It is not zero either, because the realistic install sequence is "someone sees
   /// a message get unsent, THEN installs this" — starting at exactly now would skip
-  /// the one event they installed for. Five minutes matches `WALSnapshotter`'s own
-  /// rolling-buffer window, i.e. the horizon within which recovery has any chance.
+  /// the one event they installed for.
+  ///
+  /// Five minutes matches `WALSnapshotter`'s rolling-buffer window. That is a policy
+  /// bound, NOT a proof of unrecoverability: the live WAL can still hold frames older
+  /// than five minutes (it grows to ~4 MB before `wal_autocheckpoint` fires), so a
+  /// longer window would occasionally succeed. We pick the buffer window because it
+  /// is the span we control, and because the observed yield beyond it was 0 of 243.
   public static let defaultMonitoringGraceWindow: TimeInterval = 300
 
   public static let defaultMaxAttempts = 3

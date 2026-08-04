@@ -218,11 +218,15 @@ public struct ArchivePipeline {
       var failureCategory = recovered ? nil : recoveryJSONFailureCategory(outputData)
       // A retraction that predates monitoring could never have been caught, so
       // "wal_checkpointed" (we watched and lost the race) is the wrong story to
-      // tell. Only generic misses are reclassified — a script error is a real
-      // defect and keeps its own category (issue #160).
+      // tell. Reclassify ONLY that and the no-diagnosis case: every other category
+      // is a specific finding that survives on its own merits — `script_error` is a
+      // real defect, `not_in_local_wal` means the retract never reached this device
+      // at all (typical of a remote group-chat retraction), `unknown_handle` and
+      // `attachment_only` are likewise independent of when we started watching
+      // (issue #160).
       if event.precedesMonitoring,
          let current = failureCategory,
-         current == .walCheckpointed || current == .notInLocalWAL || current == .unknown {
+         current == .walCheckpointed || current == .unknown {
         failureCategory = .predatesMonitoring
       }
       return RecoveryRun(
