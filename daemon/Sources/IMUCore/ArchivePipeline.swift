@@ -22,6 +22,15 @@ public struct ArchivePipeline {
   /// Per-stream cap on captured subprocess output, in bytes.
   public let outputByteCap: Int
 
+  /// Rolling WAL buffer, copied into each archive BEFORE recover.sh runs.
+  ///
+  /// This lives here rather than at the call site because that is exactly how
+  /// #169 happened: the daemon copied the buffer in after `archive()` returned,
+  /// so `recover.sh`'s `[[ -d "$WORK/wal-history" ]]` guard had already failed
+  /// and the whole #67/#68 fallback silently never ran. Owning the ordering
+  /// makes it un-gettable-wrong.
+  public let walSnapshotter: WALSnapshotter?
+
   private let fileManager: FileManager
 
   public init(
@@ -32,6 +41,7 @@ public struct ArchivePipeline {
     recoveryTimeout: TimeInterval = 120,
     terminationGrace: TimeInterval = 5,
     outputByteCap: Int = 4 * 1024 * 1024,
+    walSnapshotter: WALSnapshotter? = nil,
     fileManager: FileManager = .default
   ) {
     self.liveMessagesDir = liveMessagesDir
@@ -41,6 +51,7 @@ public struct ArchivePipeline {
     self.recoveryTimeout = recoveryTimeout
     self.terminationGrace = terminationGrace
     self.outputByteCap = outputByteCap
+    self.walSnapshotter = walSnapshotter
     self.fileManager = fileManager
   }
 
@@ -68,12 +79,29 @@ public struct ArchivePipeline {
     )
     try writeManifest(manifest, to: archiveDir)
 
+    // BEFORE runRecovery, not after: recover.sh scans `$WORK/wal-history` during
+    // its run, so a copy that lands afterwards is invisible to it (#169). Best
+    // effort — a failure here must not cost us the archive or the live-WAL
+    // recovery attempt, which is the path that worked even while this was broken.
+    copyWALHistory(into: archiveDir)
+
     let recovery = runRecovery(event: event, archiveDir: archiveDir)
     manifest.recovery = recovery.manifest
     try writeManifest(manifest, to: archiveDir)
     try pruneArchives()
 
     return RecoveryComplete(archiveDir: archiveDir, recovered: recovery.manifest.recovered)
+  }
+
+  private func copyWALHistory(into archiveDir: URL) {
+    guard let walSnapshotter else { return }
+    let destination = archiveDir.appendingPathComponent("wal-history", isDirectory: true)
+    do {
+      try walSnapshotter.archiveTo(destination)
+    } catch {
+      // Swallowed deliberately: the buffer is an enhancement to recovery, not a
+      // precondition for archiving the event.
+    }
   }
 
   public func pruneArchives() throws {

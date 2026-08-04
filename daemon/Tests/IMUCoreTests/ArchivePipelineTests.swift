@@ -272,3 +272,117 @@ private enum ArchivePipelineTestError: Error, LocalizedError {
     }
   }
 }
+
+// MARK: - #169 — the rolling WAL buffer must reach recover.sh
+
+extension ArchivePipelineTests {
+  /// The regression that would have caught #169: recovery possible ONLY from
+  /// `wal-history/`.
+  ///
+  /// Setup mirrors the real failure — SQLite has checkpointed the live WAL, so the
+  /// pre-retract page survives only in the rolling buffer. Two separate defects had
+  /// to be fixed for this to pass: the buffer was copied into the archive *after*
+  /// recover.sh ran, and the history scan sat inside the `else` of
+  /// `if [[ ! -s "$WAL" ]]` so it was skipped precisely when the live WAL was empty.
+  func testRecoveryFromWALHistoryAloneWhenTheLiveWALIsCheckpointed() throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let liveDir = root.appendingPathComponent("Messages", isDirectory: true)
+    try FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+    try copyFixtureDBFamily(to: liveDir)
+
+    let bufferDir = root.appendingPathComponent("wal-history", isDirectory: true)
+    try FileManager.default.createDirectory(at: bufferDir, withIntermediateDirectories: true)
+    try checkpointAwayTheLiveWAL(in: liveDir, preservingInto: bufferDir)
+
+    let snapshotter = WALSnapshotter(
+      walURL: liveDir.appendingPathComponent("chat.db-wal", isDirectory: false),
+      storeDir: bufferDir
+    )
+    let pipeline = ArchivePipeline(
+      liveMessagesDir: liveDir,
+      archivesDir: root.appendingPathComponent("archives", isDirectory: true),
+      recoverScriptURL: repoRoot().appendingPathComponent("scripts/recover.sh", isDirectory: false),
+      retentionLimit: 100,
+      walSnapshotter: snapshotter
+    )
+
+    let complete = try pipeline.archive(event: fixtureRetraction())
+
+    let archived = (try? FileManager.default.contentsOfDirectory(
+      atPath: complete.archiveDir.appendingPathComponent("wal-history").path
+    )) ?? []
+    XCTAssertTrue(archived.contains { $0.hasSuffix(".db-wal") }, "buffer must reach the archive")
+
+    let report = try readJSON(complete.archiveDir.appendingPathComponent("recovery.json"))
+    let recovered = try XCTUnwrap(report["recovered"] as? [String: Any])
+    let textB64 = try XCTUnwrap(
+      recovered["text_b64"] as? String,
+      "recovery must succeed from wal-history alone; nil means the buffer reached "
+        + "recover.sh too late, or the history scan was skipped (#169)"
+    )
+    XCTAssertEqual(
+      String(data: try XCTUnwrap(Data(base64Encoded: textB64)), encoding: .utf8),
+      "Recovered fixture message: hello WAL data!"
+    )
+    XCTAssertTrue(complete.recovered)
+  }
+
+  /// Negative control. Same checkpointed database, no buffer — recovery must fail.
+  /// Without this the test above would prove nothing about `wal-history/`.
+  func testCheckpointedLiveWALWithoutABufferCannotRecover() throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let liveDir = root.appendingPathComponent("Messages", isDirectory: true)
+    try FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+    try copyFixtureDBFamily(to: liveDir)
+    try checkpointAwayTheLiveWAL(in: liveDir, preservingInto: nil)
+
+    let pipeline = ArchivePipeline(
+      liveMessagesDir: liveDir,
+      archivesDir: root.appendingPathComponent("archives", isDirectory: true),
+      recoverScriptURL: repoRoot().appendingPathComponent("scripts/recover.sh", isDirectory: false),
+      retentionLimit: 100
+    )
+    let complete = try pipeline.archive(event: fixtureRetraction())
+    XCTAssertFalse(
+      complete.recovered,
+      "with the pre-retract page in neither the live WAL nor a buffer there is nothing to find"
+    )
+  }
+
+  private func fixtureRetraction() -> RetractionDetected {
+    RetractionDetected(
+      rowid: 200,
+      guid: "00000000-0000-0000-0000-000000000001",
+      handle: "+15551234567",
+      editedAt: 797_000_030_000_000_010
+    )
+  }
+
+  /// Reproduce SQLite having checkpointed the WAL into chat.db: the row is still
+  /// there in its post-retraction state, and the pre-retract page image is gone
+  /// from the live WAL — surviving only wherever we copied it first.
+  private func checkpointAwayTheLiveWAL(in liveDir: URL, preservingInto buffer: URL?) throws {
+    let wal = liveDir.appendingPathComponent("chat.db-wal", isDirectory: false)
+    if let buffer {
+      try FileManager.default.copyItem(
+        at: wal,
+        to: buffer.appendingPathComponent("2026-08-04T000000Z-1.db-wal", isDirectory: false)
+      )
+    }
+    try runProcess(
+      URL(fileURLWithPath: "/usr/bin/sqlite3"),
+      arguments: [
+        liveDir.appendingPathComponent("chat.db", isDirectory: false).path,
+        "PRAGMA wal_checkpoint(TRUNCATE);"
+      ]
+    )
+    // sqlite3 removes the WAL on close; recreate it empty so the daemon's snapshot
+    // step sees the same shape a live post-checkpoint Messages install has.
+    try? FileManager.default.removeItem(at: wal)
+    FileManager.default.createFile(atPath: wal.path, contents: Data())
+  }
+}

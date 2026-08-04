@@ -5,11 +5,9 @@ import Foundation
 /// pre-retract WAL states — not just the live WAL, which may have been
 /// checkpointed away by SQLite before we get a chance to copy it.
 ///
-/// NOTE (#169): the buffer does not currently reach the daemon's own recovery
-/// run. `ArchivePipeline.archive()` invokes `recover.sh` before the buffer is
-/// copied into the archive, so the script's `wal-history/` scan is skipped.
-/// Snapshots are still captured and retained, and remain usable for a manual
-/// `recover.sh` against the archive or an iPhone-backup retry.
+/// `ArchivePipeline` copies this buffer into each archive before invoking
+/// `recover.sh` (#169) — do not move that copy to a call site again; it was
+/// there once and the whole fallback silently never ran.
 ///
 /// Snapshots live at `<storeDir>/<UTC-iso-timestamp>-<size>.db-wal`. Retention
 /// is bounded by both a count cap (default 30) and a max age (default 5 min).

@@ -507,8 +507,10 @@ hr
 log "[4] Searching chat.db-wal for pre-retract page images..."
 WAL="$WORK/chat.db-wal"
 if [[ ! -s "$WAL" ]]; then
-  log "  WAL file empty or missing; skipping."
+  log "  WAL file empty or missing; live-WAL scan skipped."
   printf '[]\n' > "$WAL_JSON"
+  printf "No live chat.db-wal to scan (already checkpointed).\n" > "$WORK/wal-hits.txt"
+  FAILURE_CATEGORY="wal_checkpointed"
 else
   log "  WAL size: $(imu_stat_size "$WAL") bytes"
   PGSIZE=$(sqlite3 -readonly "$SNAP" "PRAGMA page_size;")
@@ -544,37 +546,42 @@ else
     done <<< "$WAL_RESULTS"
   fi
 
-  # Also scan the rolling WAL history buffer (#67). The daemon snapshots
-  # chat.db-wal on every change, so older WAL frames that SQLite has since
-  # checkpointed away may still survive in `wal-history/`. This is the
-  # difference-maker for long messages where the live WAL has already been
-  # rewritten by the time the recovery runs.
-  WAL_HISTORY_DIR="$WORK/wal-history"
-  if [[ -d "$WAL_HISTORY_DIR" ]]; then
-    hist_count=0
-    while IFS= read -r -d '' HIST; do
-      [[ -f "$HIST" ]] || continue
-      hist_count=$((hist_count + 1))
-      HIST_RESULTS=$(imu_extract_from_wal "$HIST" "$GUID" 2>/dev/null || true)
-      if [[ -n "$HIST_RESULTS" ]]; then
-        while IFS=$'\t' read -r off len text; do
-          line="WAL_HISTORY $(basename "$HIST")  OFFSET $off  LEN $len  TEXT: '$text'"
-          log "  $line"
-          printf "%s\n" "$line" >> "$WORK/wal-hits.txt"
-        done <<< "$HIST_RESULTS"
-      fi
-    done < <(find "$WAL_HISTORY_DIR" -maxdepth 1 -name '*.db-wal' -print0 2>/dev/null)
-    log "  wal-history scan: $hist_count snapshot(s)"
+fi
 
-    # Merge candidates from every source into wal-candidates.json so the
-    # downstream JSON-report builder sees them all.
-    lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)"
-    python3 "$lib_dir/wal_merge_candidates.py" \
-      --guid "$GUID" \
-      --live "$WAL" \
-      --history-dir "$WAL_HISTORY_DIR" \
-      > "$WAL_JSON"
-  fi
+# Also scan the rolling WAL history buffer (#67). The daemon snapshots
+# chat.db-wal on every change, so older WAL frames that SQLite has since
+# checkpointed away may still survive in `wal-history/`.
+#
+# This runs REGARDLESS of whether the live WAL still has
+# content. It used to sit inside the `else` above, so it was skipped exactly
+# when the live WAL was empty — i.e. in the checkpointed case the buffer exists
+# to rescue. Combined with the copy landing after this script ran, the #67/#68
+# fallback could never fire in the daemon path at all (#169).
+WAL_HISTORY_DIR="$WORK/wal-history"
+if [[ -d "$WAL_HISTORY_DIR" ]]; then
+  hist_count=0
+  while IFS= read -r -d '' HIST; do
+    [[ -f "$HIST" ]] || continue
+    hist_count=$((hist_count + 1))
+    HIST_RESULTS=$(imu_extract_from_wal "$HIST" "$GUID" 2>/dev/null || true)
+    if [[ -n "$HIST_RESULTS" ]]; then
+      while IFS=$'\t' read -r off len text; do
+        line="WAL_HISTORY $(basename "$HIST")  OFFSET $off  LEN $len  TEXT: '$text'"
+        log "  $line"
+        printf "%s\n" "$line" >> "$WORK/wal-hits.txt"
+      done <<< "$HIST_RESULTS"
+    fi
+  done < <(find "$WAL_HISTORY_DIR" -maxdepth 1 -name '*.db-wal' -print0 2>/dev/null)
+  log "  wal-history scan: $hist_count snapshot(s)"
+
+  # Merge candidates from every source into wal-candidates.json so the
+  # downstream JSON-report builder sees them all.
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)"
+  python3 "$lib_dir/wal_merge_candidates.py" \
+    --guid "$GUID" \
+    --live "$WAL" \
+    --history-dir "$WAL_HISTORY_DIR" \
+    > "$WAL_JSON"
 fi
 hr
 
