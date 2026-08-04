@@ -59,3 +59,7 @@ node_modules/
 # SwiftPM / local build output
 .build/
 dist/
+artifacts/progress/progress.json
+artifacts/progress/events.jsonl
+artifacts/progress/.server.json
+artifacts/progress/.progress.lock
