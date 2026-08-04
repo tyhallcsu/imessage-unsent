@@ -466,3 +466,65 @@ extension FirstRunSeedingTests {
     XCTAssertEqual(try recoveryJSONCategory(complete.archiveDir), "wal_checkpointed")
   }
 }
+
+// MARK: - Real consumers, not just the file (Codex [18] item 16)
+
+extension FirstRunSeedingTests {
+  /// Parsing recovery.json myself proves the bytes are right; it does not prove the
+  /// components the user actually sees agree. These drive the real consumers.
+  func testHistoryReaderAndNotifierBothReportPredatesMonitoring() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("imu-consumers-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let liveDir = root.appendingPathComponent("Messages", isDirectory: true)
+    try FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+    try Data("synthetic db".utf8)
+      .write(to: liveDir.appendingPathComponent("chat.db", isDirectory: false))
+
+    let archivesDir = root.appendingPathComponent("archives", isDirectory: true)
+    let complete = try runPipeline(
+      root: root, liveDir: liveDir, precedesMonitoring: true,
+      script: failingScript(category: "wal_checkpointed")
+    )
+
+    // 1. The History list (menu bar + `recent` control-socket op).
+    let entries = ArchiveHistoryReader(archivesDir: archivesDir).recent(limit: 10)
+    let archiveName = complete.archiveDir.lastPathComponent
+    let entry = try XCTUnwrap(entries.first { $0.archivePath.hasSuffix(archiveName) })
+    XCTAssertEqual(entry.failureCategory, .predatesMonitoring)
+    XCTAssertFalse(entry.recovered)
+
+    // 2. The notification, and the webhook body built from the same payload.
+    let notification = RecoveryNotificationBuilder(config: NotificationConfig())
+      .build(for: complete)
+    let payload = try XCTUnwrap(
+      try JSONSerialization.jsonObject(with: notification.recoveryJSON) as? [String: Any]
+    )
+    let recovered = try XCTUnwrap(payload["recovered"] as? [String: Any])
+    XCTAssertEqual(
+      recovered["failure_category"] as? String, "predates_monitoring",
+      "the webhook ships recovery.json verbatim — a stale category would leak to subscribers"
+    )
+  }
+
+  func testHistoryReaderKeepsWalCheckpointedForAWatchedMiss() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("imu-consumers2-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let liveDir = root.appendingPathComponent("Messages", isDirectory: true)
+    try FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+    try Data("synthetic db".utf8)
+      .write(to: liveDir.appendingPathComponent("chat.db", isDirectory: false))
+
+    let complete = try runPipeline(
+      root: root, liveDir: liveDir, precedesMonitoring: false,
+      script: failingScript(category: "wal_checkpointed")
+    )
+    let entries = ArchiveHistoryReader(
+      archivesDir: root.appendingPathComponent("archives", isDirectory: true)
+    ).recent(limit: 10)
+    let archiveName = complete.archiveDir.lastPathComponent
+    let entry = try XCTUnwrap(entries.first { $0.archivePath.hasSuffix(archiveName) })
+    XCTAssertEqual(entry.failureCategory, .walCheckpointed)
+  }
+}

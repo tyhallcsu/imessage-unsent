@@ -162,3 +162,40 @@ final class ReadReceiptDisplayTests: XCTestCase {
     return archive
   }
 }
+
+// MARK: - #160: the GUI detail pane must decode predates_monitoring
+
+extension ReadReceiptDisplayTests {
+  /// The daemon writes `predates_monitoring` into recovery.json; the loader prefers
+  /// that file over the manifest, so this is the path the detail pane actually uses.
+  func testDetailLoaderSurfacesPredatesMonitoring() throws {
+    let archive = workDir.appendingPathComponent("2026-08-04T010000Z-999", isDirectory: true)
+    try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+
+    let manifest: [String: Any] = [
+      "detected_at": "2026-08-04T01:00:00.000Z",
+      "rowid": 999,
+      "guid": "guid-999",
+      "handle": "+15550001000",
+      "edited_at": 797_000_010_000_000_000,
+      "snapshot_started_at": "2026-08-04T01:00:00.000Z",
+      "snapshot_finished_at": "2026-08-04T01:00:00.500Z",
+      "snap_files": [:],
+      "recovery": ["recovered": false, "failure_category": "predates_monitoring"]
+    ]
+    try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
+      .write(to: archive.appendingPathComponent("manifest.json"))
+    try JSONSerialization.data(
+      withJSONObject: [
+        "schema_version": 1,
+        "recovered": ["text_b64": NSNull(), "failure_category": "predates_monitoring"]
+      ], options: [.sortedKeys]
+    ).write(to: archive.appendingPathComponent("recovery.json"))
+
+    let detail = try FileSystemRecoveryDetailLoader().load(archiveDir: archive)
+    XCTAssertEqual(detail.failureCategory, .predatesMonitoring)
+    XCTAssertFalse(detail.recovered)
+    // Not the generic bucket — that would tell the user "cause not determined".
+    XCTAssertNotEqual(detail.failureCategory, .unknown)
+  }
+}
