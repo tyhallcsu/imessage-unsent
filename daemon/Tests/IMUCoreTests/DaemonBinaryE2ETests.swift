@@ -96,7 +96,7 @@ final class DaemonBinaryE2ETests: XCTestCase {
     )
 
     // The startup pass must snapshot before detecting — the rolling buffer is
-    // recovery's fallback when the live WAL no longer holds the pre-retract page.
+    // preserved input for a later or manual recovery (and the prerequisite for #169) when the live WAL no longer holds the pre-retract page.
     let walHistoryDir = fakeHome.appendingPathComponent(
       "Library/Application Support/imessage-unsent/wal-history", isDirectory: true
     )
