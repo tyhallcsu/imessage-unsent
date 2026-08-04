@@ -205,6 +205,10 @@ struct RecoveryDetailView: View {
         if let currentDetail {
           metadataRow("GUID", currentDetail.guid)
         }
+        metadataRow("Read before unsend", readBeforeUnsendText)
+        if let receipt = currentDetail?.readReceipt {
+          metadataRow("Delivery", receipt.deliverySummary)
+        }
         metadataRow("Detected at", entry.detectedAt)
         metadataRow("Archive ID", entry.id)
         metadataRow("Archive path", entry.archivePath)
@@ -218,6 +222,17 @@ struct RecoveryDetailView: View {
       .padding(12)
       .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
     }
+  }
+
+  /// Archives written before the daemon recorded receipt state have no block
+  /// at all — that reads as "unknown", never "no".
+  private var readBeforeUnsendText: String {
+    guard let detail = currentDetail else {
+      // A failed manifest load is a different unknown from a legacy archive.
+      return "Unknown — archive details could not be loaded"
+    }
+    return detail.readReceipt?.summary
+      ?? "Unknown — this archive predates read-receipt capture"
   }
 
   private func metadataRow(_ label: String, _ value: String) -> some View {

@@ -63,6 +63,7 @@ public struct ArchivePipeline {
       snapshotStartedAt: isoString(snapshotStartedAt),
       snapshotFinishedAt: isoString(snapshotFinishedAt),
       snapFiles: snapFiles,
+      readReceipt: event.readContext,
       recovery: nil
     )
     try writeManifest(manifest, to: archiveDir)
@@ -293,6 +294,10 @@ public struct ArchiveManifest: Codable, Equatable {
   public let snapshotStartedAt: String
   public let snapshotFinishedAt: String
   public let snapFiles: [String: ArchiveSnapFile]
+  /// Receipt state read off the retracted row. `nil` on archives written
+  /// before this was recorded, and on databases whose `message` table lacks
+  /// the receipt columns — in both cases "unknown", never "not read".
+  public let readReceipt: RetractionReadContext?
   public var recovery: ArchiveRecovery?
   public var compactionState: String?
   public var compactedAt: String?
@@ -306,6 +311,7 @@ public struct ArchiveManifest: Codable, Equatable {
     case snapshotStartedAt = "snapshot_started_at"
     case snapshotFinishedAt = "snapshot_finished_at"
     case snapFiles = "snap_files"
+    case readReceipt = "read_receipt"
     case recovery
     case compactionState = "compaction_state"
     case compactedAt = "compacted_at"
@@ -320,6 +326,7 @@ public struct ArchiveManifest: Codable, Equatable {
     snapshotStartedAt: String,
     snapshotFinishedAt: String,
     snapFiles: [String: ArchiveSnapFile],
+    readReceipt: RetractionReadContext? = nil,
     recovery: ArchiveRecovery?,
     compactionState: String? = nil,
     compactedAt: String? = nil
@@ -332,6 +339,7 @@ public struct ArchiveManifest: Codable, Equatable {
     self.snapshotStartedAt = snapshotStartedAt
     self.snapshotFinishedAt = snapshotFinishedAt
     self.snapFiles = snapFiles
+    self.readReceipt = readReceipt
     self.recovery = recovery
     self.compactionState = compactionState
     self.compactedAt = compactedAt
@@ -347,6 +355,11 @@ public struct ArchiveManifest: Codable, Equatable {
     self.snapshotStartedAt = try container.decode(String.self, forKey: .snapshotStartedAt)
     self.snapshotFinishedAt = try container.decode(String.self, forKey: .snapshotFinishedAt)
     self.snapFiles = try container.decode([String: ArchiveSnapFile].self, forKey: .snapFiles)
+    // decodeIfPresent, not decode: every archive written before this field
+    // existed must keep loading.
+    self.readReceipt = try container.decodeIfPresent(
+      RetractionReadContext.self, forKey: .readReceipt
+    )
     self.recovery = try container.decodeIfPresent(ArchiveRecovery.self, forKey: .recovery)
     self.compactionState = try container.decodeIfPresent(String.self, forKey: .compactionState)
     self.compactedAt = try container.decodeIfPresent(String.self, forKey: .compactedAt)

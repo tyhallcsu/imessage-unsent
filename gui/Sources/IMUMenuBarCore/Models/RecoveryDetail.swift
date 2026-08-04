@@ -13,6 +13,10 @@ public struct RecoveryDetail: Equatable {
   public let archivePath: String
   public let snapshotFiles: [String]
   public let failureCategory: RecoveryFailureCategory?
+  /// `nil` for archives written before the daemon recorded receipt state, and
+  /// for databases without the receipt columns. Render as "unknown" — a
+  /// missing field is not a negative.
+  public let readReceipt: RecoveryReadReceipt?
 
   public init(
     id: String,
@@ -26,7 +30,8 @@ public struct RecoveryDetail: Equatable {
     recoveryError: String?,
     archivePath: String,
     snapshotFiles: [String],
-    failureCategory: RecoveryFailureCategory? = nil
+    failureCategory: RecoveryFailureCategory? = nil,
+    readReceipt: RecoveryReadReceipt? = nil
   ) {
     self.id = id
     self.handle = handle
@@ -40,5 +45,6 @@ public struct RecoveryDetail: Equatable {
     self.archivePath = archivePath
     self.snapshotFiles = snapshotFiles
     self.failureCategory = failureCategory
+    self.readReceipt = readReceipt
   }
 }

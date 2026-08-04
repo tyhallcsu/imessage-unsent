@@ -70,6 +70,15 @@ public struct FileSystemRecoveryDetailLoader: RecoveryDetailLoading {
       .keys
       .sorted() ?? []
 
+    let readReceipt = manifest.readReceipt.map {
+      RecoveryReadReceipt(
+        readState: ReadReceiptState(rawValue: $0.readState ?? "") ?? .none,
+        deliveredState: ReadReceiptState(rawValue: $0.deliveredState ?? "") ?? .none,
+        readBeforeRetraction: $0.readBeforeRetraction,
+        readToRetractSeconds: $0.readToRetractSeconds
+      )
+    }
+
     return RecoveryDetail(
       id: archiveDir.lastPathComponent,
       handle: manifest.handle,
@@ -82,7 +91,8 @@ public struct FileSystemRecoveryDetailLoader: RecoveryDetailLoading {
       recoveryError: recoveryError,
       archivePath: archiveDir.path,
       snapshotFiles: snapshotFiles,
-      failureCategory: failureCategory
+      failureCategory: failureCategory,
+      readReceipt: readReceipt
     )
   }
 }
@@ -94,6 +104,7 @@ private struct ManifestDTO: Decodable {
   let handle: String
   let editedAt: Int64?
   let snapFiles: [String: SnapFileDTO]?
+  let readReceipt: ReadReceiptDTO?
   let recovery: ManifestRecoveryDTO?
 
   enum CodingKeys: String, CodingKey {
@@ -103,7 +114,25 @@ private struct ManifestDTO: Decodable {
     case handle
     case editedAt = "edited_at"
     case snapFiles = "snap_files"
+    case readReceipt = "read_receipt"
     case recovery
+  }
+}
+
+/// Every field optional: archives predating the daemon's receipt support have
+/// no `read_receipt` block at all, and a partially-written one must degrade to
+/// "unknown" rather than fail the whole manifest decode.
+private struct ReadReceiptDTO: Decodable {
+  let readState: String?
+  let deliveredState: String?
+  let readBeforeRetraction: Bool?
+  let readToRetractSeconds: Double?
+
+  enum CodingKeys: String, CodingKey {
+    case readState = "read_state"
+    case deliveredState = "delivered_state"
+    case readBeforeRetraction = "read_before_retraction"
+    case readToRetractSeconds = "read_to_retract_seconds"
   }
 }
 
