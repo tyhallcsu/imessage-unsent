@@ -5,11 +5,14 @@ public enum RecoveryFailureCategory: String, Codable, Equatable, CaseIterable {
   case unknownHandle = "unknown_handle"
   case notInLocalWAL = "not_in_local_wal"
   case attachmentOnly = "attachment_only"
-  /// The retraction happened before this daemon began watching — typically the
-  /// first launch after install, or the first tick after state was reset. We were
-  /// not there when the pre-retract page was written, so no local forensics could
-  /// have recovered it. Distinct from `walCheckpointed`, which means we WERE
-  /// watching and lost the race (issue #160).
+  /// The retraction predates the monitoring baseline this launch established —
+  /// a first run after install, or the first tick after state was reset (a
+  /// quarantined corrupt state file also resets it, so the daemon may well have
+  /// been running before). We were not tracking the row when its pre-retract page
+  /// was written, so a miss here reflects when monitoring started, not the health
+  /// of the daemon and not proof the text was unrecoverable — an older page can
+  /// still be in the live WAL. Distinct from `walCheckpointed`, which means we
+  /// WERE tracking and lost the race (issue #160).
   case predatesMonitoring = "predates_monitoring"
   case scriptError = "script_error"
   case unknown
@@ -25,7 +28,7 @@ public enum RecoveryFailureCategory: String, Codable, Equatable, CaseIterable {
     case .attachmentOnly:
       return "The original message was attachment-only — no text body to recover."
     case .predatesMonitoring:
-      return "This unsend happened before the daemon started watching, so there was nothing to catch."
+      return "This unsend predates the monitoring baseline set when the daemon last started from a fresh state."
     case .scriptError:
       return "The recovery script failed before producing output."
     case .unknown:
@@ -44,7 +47,7 @@ public enum RecoveryFailureCategory: String, Codable, Equatable, CaseIterable {
     case .attachmentOnly:
       return "Attachment recovery is tracked separately — see the Limitations section in README."
     case .predatesMonitoring:
-      return "Not a failure — recovery only works for unsends that happen while the daemon is running. Nothing to do."
+      return "Not a defect. Recovery is expected from the point monitoring begins; if the daemon's state was reset, events from before that reset land here."
     case .scriptError:
       return "Please file a bug with the contents of recovery.stderr.txt from the archive directory."
     case .unknown:

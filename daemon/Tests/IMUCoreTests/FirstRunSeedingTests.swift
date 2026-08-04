@@ -206,7 +206,8 @@ final class FirstRunSeedingTests: XCTestCase {
 
   func testDefaultGraceWindowMatchesTheWALBufferHorizon() {
     // 5 minutes is not arbitrary — it is WALSnapshotter's rolling-buffer window,
-    // i.e. the horizon in which recovery has any chance at all.
+    // i.e. the span of WAL history we retain ourselves. Not a recoverability
+    // limit: the live WAL can hold older frames.
     XCTAssertEqual(RetractionDetector.defaultMonitoringGraceWindow, 300)
   }
 
