@@ -39,6 +39,56 @@ def checksum_endian(wal):
     raise RuntimeError("could not infer WAL checksum byte order")
 
 
+# SQLite stamps the library version that last wrote a database into its header
+# at offset 96 (`SQLITE_VERSION_NUMBER`). That single field is the whole reason
+# the checked-in fixture used to churn: rebuilding on a machine with a
+# different SQLite rewrote 2 bytes and left the tree dirty (issue #165).
+#
+# Pinning it to a frozen constant makes the fixture reproducible across SQLite
+# versions — verified byte-identical between 3.41.2 and 3.53.3. The field is
+# informational; SQLite does not validate it against the running library.
+#
+# `version_valid_for` (offset 92) is deliberately left alone: it tracks the
+# change counter rather than the library, and has been stable across every
+# version observed. Pinning only what actually drifts keeps the fixture honest.
+FIXTURE_SQLITE_VERSION = 3_051_000
+SQLITE_VERSION_OFFSET = 96
+
+
+def normalize_sqlite_header(db_path):
+    """Freeze the SQLite version stamp in a database file header."""
+    with open(db_path, "r+b") as handle:
+        handle.seek(SQLITE_VERSION_OFFSET)
+        handle.write(struct.pack(">I", FIXTURE_SQLITE_VERSION))
+
+
+def normalize_wal_page_one_frames(wal_path):
+    """Freeze the version stamp in every page-1 image inside the WAL.
+
+    Page 1 carries the 100-byte database header, and the fixture's WAL holds
+    five separate copies of it. Normalizing only chat.db would leave those
+    copies drifting. Must run BEFORE normalize_wal(), which recomputes the
+    frame checksums this invalidates.
+    """
+    wal = bytearray(wal_path.read_bytes())
+    if len(wal) < 32:
+        return
+
+    page_size = struct.unpack(">I", wal[8:12])[0]
+    frame_size = 24 + page_size
+    if (len(wal) - 32) % frame_size != 0:
+        raise RuntimeError("WAL has an unexpected frame size")
+
+    for offset in range(32, len(wal), frame_size):
+        page_number = struct.unpack(">I", wal[offset : offset + 4])[0]
+        if page_number != 1:
+            continue
+        stamp_at = offset + 24 + SQLITE_VERSION_OFFSET
+        wal[stamp_at : stamp_at + 4] = struct.pack(">I", FIXTURE_SQLITE_VERSION)
+
+    wal_path.write_bytes(wal)
+
+
 def normalize_wal(wal_path):
     wal = bytearray(wal_path.read_bytes())
     if len(wal) < 32:
@@ -149,6 +199,11 @@ def build_iphone_backup_fixture(out_dir, handle, guid, fixture_text, sent_at):
     )
     sms.commit()
     sms.close()
+
+    # Before the utime pass below — writing to the files afterwards would undo
+    # the deterministic mtimes.
+    normalize_sqlite_header(manifest_path)
+    normalize_sqlite_header(sms_path)
 
     backup_unix_time = int((sent_at / 1_000_000_000) + 978_307_200 + 10)
     for path in (backup_root, manifest_path, sms_path):
@@ -385,6 +440,9 @@ for (
 writer.commit()
 
 build_iphone_backup_fixture(out_dir, handle, guid, fixture_text, sent_at)
+normalize_sqlite_header(db_path)
+# Order matters: patch the page-1 images first, then recompute WAL checksums.
+normalize_wal_page_one_frames(Path(f"{db_path}-wal"))
 normalize_wal(Path(f"{db_path}-wal"))
 print(f"fixture_text={fixture_text}", flush=True)
 print(f"edit_v1={edit_v1_text}", flush=True)
