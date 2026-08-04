@@ -11,9 +11,10 @@ public enum RecoveryFailureCategory: String, Codable, Equatable, CaseIterable {
   case notInLocalWAL = "not_in_local_wal"
   case attachmentOnly = "attachment_only"
   /// The retraction predates the monitoring baseline this launch established —
-  /// a first run after install, or the first tick after state was reset (a
-  /// quarantined corrupt state file also resets it, so the daemon may well have
-  /// been running before — whether it was is unknown here). A miss in this
+  /// a launch that starts from missing or quarantined state (a corrupt state file
+  /// is quarantined at startup, so the daemon may well have been running for
+  /// months before — whether it was is unknown here). The baseline is set when the
+  /// detector initialises, not when the file was removed. A miss in this
   /// category reflects where the baseline was set, not the health of the daemon,
   /// and is not proof the text was unrecoverable — an older page can still be in
   /// the live WAL. Distinct from `walCheckpointed`, which means we
@@ -52,7 +53,7 @@ public enum RecoveryFailureCategory: String, Codable, Equatable, CaseIterable {
     case .attachmentOnly:
       return "Attachment recovery is tracked separately — see the Limitations section in README."
     case .predatesMonitoring:
-      return "Not a defect. Recovery is expected from the point monitoring begins; if the daemon's state was reset, events from before that reset land here."
+      return "Not a defect. Recovery is expected from the point monitoring begins; events preceding a fresh-state launch land here."
     case .scriptError:
       return "Please file a bug with the contents of recovery.stderr.txt from the archive directory."
     case .unknown:
