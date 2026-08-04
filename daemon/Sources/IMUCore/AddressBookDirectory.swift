@@ -43,11 +43,11 @@ public final class AddressBookDirectory {
   }
 
   /// The display name for a handle, or `nil` if unknown or unreadable.
-  public func displayName(forHandle handle: String) -> String? {
+  public func displayName(forHandle handle: String) -> ContactName? {
     guard let key = Self.indexKey(for: handle) else { return nil }
     return queue.sync {
       refreshIfNeeded()
-      return index?[key]
+      return index?[key].map(ContactName.init)
     }
   }
 
