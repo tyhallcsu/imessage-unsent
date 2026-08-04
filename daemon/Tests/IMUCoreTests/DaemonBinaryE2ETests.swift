@@ -135,11 +135,18 @@ final class DaemonBinaryE2ETests: XCTestCase {
     XCTAssertEqual(entry["text"] as? String, "Recovered fixture message: hello WAL data!")
 
     // The startup pass snapshots before it detects; without that the grace-window
-    // event loses the rolling-buffer fallback (Codex [26]).
-    let snapshots = (try? FileManager.default.contentsOfDirectory(atPath: walHistoryDir.path)) ?? []
-    XCTAssertFalse(
-      snapshots.isEmpty,
-      "startup detection must snapshot the WAL first: log=\n\(captureLog())"
+    // event loses the rolling-buffer fallback. Assert against the ARCHIVE's copy,
+    // not the global buffer — checking the buffer alone would still pass if the
+    // copy into the archive regressed, which is the copy recovery actually reads.
+    let archiveDir = archivesDir.appendingPathComponent(
+      try XCTUnwrap(archiveDirs.first), isDirectory: true
+    )
+    let archivedHistory = (try? FileManager.default.contentsOfDirectory(
+      atPath: archiveDir.appendingPathComponent("wal-history", isDirectory: true).path
+    )) ?? []
+    XCTAssertTrue(
+      archivedHistory.contains { $0.hasSuffix(".db-wal") },
+      "the archive's wal-history/ must hold the startup snapshot: found \(archivedHistory), log=\n\(captureLog())"
     )
   }
 
