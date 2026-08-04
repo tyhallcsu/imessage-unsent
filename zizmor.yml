@@ -1,0 +1,22 @@
+# zizmor configuration — GitHub Actions security audit (issue #127).
+#
+# Everything zizmor reports is fixed in the workflows themselves except the
+# action-pinning policy below, which is a deliberate, argued exception rather
+# than a blanket ignore.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # Every action this repo uses is first-party `actions/*` from GitHub.
+        # Requiring a full-SHA pin on those buys little here — the tag-mutation
+        # supply-chain attacks that motivate hash-pinning (e.g. the March 2025
+        # tj-actions/changed-files compromise) target third-party actions whose
+        # maintainer account can be taken over. Against that, 20 opaque SHAs on
+        # a repo with no Dependabot/Renovate rot silently: nothing tells the next
+        # contributor their `actions/cache` is three majors stale.
+        #
+        # So: `actions/*` may stay on a tag, and anything else MUST be hash-pinned.
+        # The moment a third-party action is introduced, this fails the build and
+        # forces the decision at the right time. Revisit if Dependabot lands.
+        "actions/*": ref-pin
+        "*": hash-pin

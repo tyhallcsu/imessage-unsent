@@ -10,11 +10,38 @@ permissions:
   contents: read
 
 jobs:
+  # Workflows are the one place in this repo with no other gate: shellcheck skips
+  # them, and a broken `${{ }}` or a bad `needs:` only surfaces on the run that
+  # was supposed to cut a release. actionlint catches the syntax/expression class;
+  # zizmor catches the security class (see zizmor.yml for the pinning policy).
+  workflow-lint:
+    name: Workflow lint (actionlint + zizmor)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run actionlint
+        # Run as a container rather than via the `rhysd/actionlint` action: that
+        # would be this repo's first third-party action, which zizmor.yml requires
+        # to be hash-pinned, for no gain over `docker run`. Pinned to an exact
+        # version tag (not `latest`) so a linter upgrade is a visible commit.
+        run: |
+          docker run --rm -v "$PWD:/repo" --workdir /repo \
+            rhysd/actionlint:1.7.7 -color
+
+      - name: Run zizmor
+        run: |
+          pipx run zizmor --config zizmor.yml .github/workflows/
+
   shellcheck:
     name: Shellcheck (all shell sources)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install shellcheck
         run: |
           sudo apt-get update -y
@@ -27,6 +54,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -40,6 +69,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -55,6 +86,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Cache Homebrew bottles
         uses: actions/cache@v4
         with:
@@ -81,6 +114,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Cache daemon .build
         uses: actions/cache@v4
         with:
@@ -98,6 +133,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Cache gui .build
         uses: actions/cache@v4
         with:
@@ -115,6 +152,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Verify README internal links resolve
         run: |
           # crude check: every [..](path) where path starts with ./ or no scheme should exist

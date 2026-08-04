@@ -16,8 +16,11 @@ on:
         required: true
         type: string
 
+# Least privilege at the workflow level: `prepare` and `build-macos` only read the
+# repo. Only `publish` creates the draft release, so only it gets `contents: write`
+# (zizmor excessive-permissions). `read` rather than `{}` — checkout needs it.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   # Cheap, portable steps run on ubuntu so macOS minutes (10x billable on
@@ -31,6 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Verify tag format and ancestry
@@ -114,6 +118,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.tag }}
 
       # Guard against daemon/Sources/IMUCore/Version.swift drifting from the
@@ -134,21 +139,11 @@ jobs:
           fi
           echo "daemon version $daemon_version matches release $TAG"
 
-      - name: Cache daemon .build
-        uses: actions/cache@v4
-        with:
-          path: daemon/.build
-          key: swift-daemon-release-${{ runner.os }}-${{ hashFiles('daemon/Package.swift', 'daemon/Sources/**/*.swift') }}
-          restore-keys: |
-            swift-daemon-release-${{ runner.os }}-
-
-      - name: Cache gui .build
-        uses: actions/cache@v4
-        with:
-          path: gui/.build
-          key: swift-gui-release-${{ runner.os }}-${{ hashFiles('gui/Package.swift', 'gui/Sources/**/*.swift') }}
-          restore-keys: |
-            swift-gui-release-${{ runner.os }}-
+      # No .build cache on the release path (zizmor cache-poisoning). Neither Swift
+      # package has external dependencies, so the cache only held this repo's own
+      # compiled objects — and `restore-keys` fell back to ANY prior release cache,
+      # letting objects built from a different commit be linked into a signed,
+      # notarized artifact. A release build is a clean build. CI keeps its caches.
 
       - name: Build + sign + notarize release artifacts
         env:
@@ -164,8 +159,11 @@ jobs:
           APPLE_TEAM_ID:                    ${{ secrets.APPLE_TEAM_ID }}
           APPLE_NOTARIZE_USER:     ${{ secrets.APPLE_NOTARIZE_USER }}
           APPLE_NOTARIZE_PASSWORD: ${{ secrets.APPLE_NOTARIZE_PASSWORD }}
+          # See the note in `publish` — validated in `prepare`, routed through
+          # env anyway so no expression expands into a shell body.
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          bash scripts/build-release.sh "${{ needs.prepare.outputs.tag }}" dist
+          bash scripts/build-release.sh "$TAG" dist
 
       - uses: actions/upload-artifact@v4
         with:
@@ -181,6 +179,9 @@ jobs:
     name: Publish draft GitHub release
     runs-on: ubuntu-latest
     needs: [prepare, build-macos]
+    # The only job that writes: it cuts the draft release.
+    permissions:
+      contents: write
     steps:
       - name: Download release metadata
         uses: actions/download-artifact@v4
@@ -197,10 +198,17 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Defense in depth (zizmor template-injection). `prepare` already
+          # regex-validates the tag as semver and proves it is an ancestor of
+          # main (#115 / F-M8), so these values are not attacker-shaped — but
+          # routing them through env keeps the guarantee local instead of
+          # depending on a validation two jobs away.
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
         run: |
-          tag="${{ needs.prepare.outputs.tag }}"
+          tag="$TAG"
           prerelease_flag=""
-          if [[ "${{ needs.prepare.outputs.prerelease }}" == "true" ]]; then
+          if [[ "$PRERELEASE" == "true" ]]; then
             prerelease_flag="--prerelease"
           fi
           # shellcheck disable=SC2086
