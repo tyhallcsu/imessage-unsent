@@ -175,6 +175,26 @@ final class WatcherDaemon {
     try watcher.start()
     walWatcher = watcher
     log("watching wal path=\(walURL.path) initial_size=\(lastWalSize)")
+
+    // FSWatcher records the current WAL signature on start() so the first poll
+    // does not fire on pre-existing state, and detection otherwise only runs from
+    // handleWalChange. Without this pass, a retraction that happened inside the
+    // grace window — the exact case the window exists for, someone installing
+    // right after seeing a message vanish — would wait for an unrelated WAL write
+    // while its recoverable frame ages out. Run one detection now (#160).
+    if let detector, let archivePipeline {
+      let walSnapshotter = self.walSnapshotter
+      let notifier = self.notifier
+      log("startup detection pass (grace window)")
+      pipelineQueue.async { [weak self] in
+        self?.runDetectionPipeline(
+          detector: detector,
+          archivePipeline: archivePipeline,
+          walSnapshotter: walSnapshotter,
+          notifier: notifier
+        )
+      }
+    }
   }
 
   private func handleWalChange(size: Int64) {

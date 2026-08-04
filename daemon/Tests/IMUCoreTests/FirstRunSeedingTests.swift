@@ -541,3 +541,47 @@ extension FirstRunSeedingTests {
     XCTAssertEqual(entry.failureCategory, .walCheckpointed)
   }
 }
+
+// MARK: - Forward compatibility (Codex [24] item 19)
+
+extension FirstRunSeedingTests {
+  /// A category this build doesn't know maps to `.unknown` on the enum — but it is
+  /// NOT the literal "unknown" diagnosis, and converting it to predates_monitoring
+  /// would erase information from a newer recover.sh that we simply can't parse yet.
+  func testUnrecognizedFutureCategoryIsPreservedNotReclassified() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("imu-forward-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let liveDir = root.appendingPathComponent("Messages", isDirectory: true)
+    try FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+    try Data("synthetic db".utf8)
+      .write(to: liveDir.appendingPathComponent("chat.db", isDirectory: false))
+
+    let complete = try runPipeline(
+      root: root, liveDir: liveDir, precedesMonitoring: true,
+      script: failingScript(category: "some_future_diagnosis_v7")
+    )
+
+    XCTAssertEqual(
+      try recoveryJSONCategory(complete.archiveDir), "some_future_diagnosis_v7",
+      "an unparseable category must survive verbatim for a newer reader"
+    )
+    XCTAssertNotEqual(try recoveryJSONCategory(complete.archiveDir), "predates_monitoring")
+  }
+
+  func testLiteralUnknownStillReclassifies() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("imu-forward2-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let liveDir = root.appendingPathComponent("Messages", isDirectory: true)
+    try FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+    try Data("synthetic db".utf8)
+      .write(to: liveDir.appendingPathComponent("chat.db", isDirectory: false))
+
+    let complete = try runPipeline(
+      root: root, liveDir: liveDir, precedesMonitoring: true,
+      script: failingScript(category: "unknown")
+    )
+    XCTAssertEqual(try recoveryJSONCategory(complete.archiveDir), "predates_monitoring")
+  }
+}

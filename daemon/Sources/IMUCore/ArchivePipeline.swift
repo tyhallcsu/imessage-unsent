@@ -222,10 +222,18 @@ public struct ArchivePipeline {
       // at all (typical of a remote group-chat retraction), `unknown_handle` and
       // `attachment_only` are likewise independent of when we started watching
       // (issue #160).
+      // Gate on the RAW string, not the mapped enum: an unrecognized category
+      // from a newer recover.sh also maps to `.unknown`, and silently converting
+      // a future diagnosis into "predates monitoring" would erase information we
+      // simply don't understand yet.
+      let rawCategory = recoveryJSONRawFailureCategory(outputData)
+      var didReclassify = false
       if event.precedesMonitoring,
-         let current = failureCategory,
-         current == .walCheckpointed || current == .unknown {
+         failureCategory != nil,
+         rawCategory == RecoveryFailureCategory.walCheckpointed.rawValue
+           || rawCategory == RecoveryFailureCategory.unknown.rawValue {
         failureCategory = .predatesMonitoring
+        didReclassify = true
       }
 
       // Write recovery.json AFTER reclassifying, with the final category patched
@@ -234,8 +242,12 @@ public struct ArchivePipeline {
       // recovery.json's category over the manifest's, so leaving the raw value
       // here would have made predates_monitoring invisible everywhere the user
       // actually looks (issue #160).
-      let finalOutput = failureCategory.map { rewriteFailureCategory(in: outputData, to: $0) }
-        ?? outputData
+      // Rewrite ONLY when we actually reclassified. Patching unconditionally would
+      // flatten an unrecognized raw value to the enum's `.unknown`, destroying a
+      // future recover.sh's diagnosis on its way through an older daemon.
+      let finalOutput = didReclassify
+        ? rewriteFailureCategory(in: outputData, to: .predatesMonitoring)
+        : outputData
       try? finalOutput.write(to: recoveryURL, options: .atomic)
       return RecoveryRun(
         manifest: ArchiveRecovery(
@@ -462,6 +474,19 @@ private func recoveryJSONHasText(_ data: Data) -> Bool {
   }
 
   return !text.isEmpty
+}
+
+/// The `failure_category` string exactly as recover.sh wrote it, before it is
+/// mapped onto the enum (which collapses anything unrecognized to `.unknown`).
+func recoveryJSONRawFailureCategory(_ data: Data) -> String? {
+  guard
+    let object = try? JSONSerialization.jsonObject(with: data),
+    let payload = object as? [String: Any],
+    let recovered = payload["recovered"] as? [String: Any]
+  else {
+    return nil
+  }
+  return recovered["failure_category"] as? String
 }
 
 func recoveryJSONFailureCategory(_ data: Data) -> RecoveryFailureCategory? {
