@@ -134,10 +134,14 @@ final class DaemonBinaryE2ETests: XCTestCase {
     XCTAssertEqual(entry["recovered"] as? Bool, true)
     XCTAssertEqual(entry["text"] as? String, "Recovered fixture message: hello WAL data!")
 
-    // The startup pass snapshots before it detects; without that the grace-window
-    // event loses the rolling-buffer fallback. Assert against the ARCHIVE's copy,
-    // not the global buffer — checking the buffer alone would still pass if the
-    // copy into the archive regressed, which is the copy recovery actually reads.
+    // The startup pass snapshots before it detects, and the buffer is copied into
+    // the archive. Assert against the ARCHIVE's copy, not the global buffer —
+    // checking the buffer alone would still pass if the copy regressed.
+    //
+    // This does NOT prove recovery used it: #169 shows the copy lands after
+    // recover.sh has already run, so the recovery above succeeded from the live
+    // WAL clone. What this guards is that the frames are captured and preserved,
+    // which is the precondition for #169's fix.
     let archiveDir = archivesDir.appendingPathComponent(
       try XCTUnwrap(archiveDirs.first), isDirectory: true
     )

@@ -214,9 +214,10 @@ final class WatcherDaemon {
 
   private func handleWalChange(size: Int64) {
     // Snapshot the WAL into the rolling buffer FIRST, before any SQL work
-    // that might race against iMessage's auto-checkpoint (#67). The buffer
-    // is what the recovery script falls back to when the live WAL no longer
-    // contains the pre-retract page image.
+    // that might race against iMessage's auto-checkpoint (#67). The buffer is
+    // intended as recovery's fallback when the live WAL no longer contains the
+    // pre-retract page — though see #169: it is copied into the archive after
+    // recover.sh has already run, so today it only serves later attempts.
     do {
       _ = try walSnapshotter?.snapshot()
     } catch {
@@ -267,8 +268,12 @@ final class WatcherDaemon {
         )
         do {
           let complete = try archivePipeline.archive(event: event)
-          // Copy the rolling WAL buffer into the archive's wal-history/ so
-          // the recovery script can scan older WAL frames too (#67).
+          // Copy the rolling WAL buffer into the archive's wal-history/ (#67).
+          // NOTE (#169): this runs AFTER archive() has already invoked
+          // recover.sh, so the script's wal-history scan never sees it. The
+          // copy is still worth doing — a manual recover.sh against the archive
+          // or an iPhone-backup retry can use it — but it does not help the run
+          // above, which is the ordering defect #169 fixes.
           let walHistoryDest = complete.archiveDir.appendingPathComponent(
             "wal-history",
             isDirectory: true

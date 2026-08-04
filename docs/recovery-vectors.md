@@ -181,9 +181,12 @@ The daemon mitigates this with a **rolling snapshot buffer** at `~/Library/Appli
 
 - On every `chat.db-wal` change (via FSEvents + 1 Hz polling fallback), the daemon copies the *current* WAL into the buffer with a timestamped filename.
 - The buffer is capped — default **30 snapshots** AND **5 minutes** of wall time, whichever is more restrictive. Older snapshots get pruned.
-- When `recover.sh` runs (either ad-hoc CLI or driven by the daemon's `ArchivePipeline`), it scans **every** WAL file in `wal-history/` in addition to the live `chat.db-wal` ([`recover.sh:529-560`](../scripts/recover.sh#L529-L560)). The candidates are merged by [`wal_merge_candidates.py`](../scripts/lib/wal_merge_candidates.py) into a single `wal-candidates.json` so the downstream JSON report sees all of them.
+- When `recover.sh` runs **ad-hoc from the CLI against an archive**, it scans **every** WAL file in `wal-history/` in addition to the live `chat.db-wal` ([`recover.sh:529-560`](../scripts/recover.sh#L529-L560)). The candidates are merged by [`wal_merge_candidates.py`](../scripts/lib/wal_merge_candidates.py) into a single `wal-candidates.json` so the downstream JSON report sees all of them.
 
-**What this fixes:** the dominant Vector-4 failure mode where the pre-retract text was in the WAL ~30 s ago but is gone by the time the daemon archives. With the buffer, the daemon retains those 30 s of WAL state and can recover from any of them.
+> [!WARNING]
+> **This does not currently work in the daemon path — see [#169](https://github.com/tyhallcsu/imessage-unsent/issues/169).** `ArchivePipeline.archive()` runs `recover.sh` internally, but the buffer is copied into the archive only *after* `archive()` returns, so the script's `[[ -d "$WORK/wal-history" ]]` guard fails and the scan is skipped. Snapshots are captured and retained correctly; they just arrive too late to help the run they were meant to help. Everything below describes the intended behaviour and becomes true once #169 lands.
+
+**What this fixes (once #169 lands):** the dominant Vector-4 failure mode where the pre-retract text was in the WAL ~30 s ago but is gone by the time the daemon archives. With the buffer, the daemon retains those 30 s of WAL state and can recover from any of them.
 
 **What it does NOT fix:**
 - Retractions that happened **before the daemon was installed** — there's no historical buffer to draw from.
@@ -379,7 +382,7 @@ Each vector has a failure mode. When all of them fail it's almost always for the
 
 ### Practical guidance to maximize recovery rate
 
-1. **Install the daemon and grant Full Disk Access before you ever need it.** The daemon's rolling WAL snapshot buffer (issue #67) is the single biggest win. Without it, recovery is best-effort against whatever the live WAL happens to look like at the moment you query it.
+1. **Install the daemon and grant Full Disk Access before you ever need it.** The daemon's rolling WAL snapshot buffer (issue #67) is designed to be the single biggest win — though see [#169](https://github.com/tyhallcsu/imessage-unsent/issues/169): it does not yet feed daemon-driven recovery. Without it, recovery is best-effort against whatever the live WAL happens to look like at the moment you query it.
 2. **Run the recovery as soon as possible after the unsend.** Each subsequent iMessage write moves more frames into the WAL and increases the chance of `wal_autocheckpoint` (≈ 4 MB) firing.
 3. **Don't restart Messages or sign out of iCloud after an unsend you want to recover.** Restarts often trigger a synchronous checkpoint of the WAL.
 4. **Enable Time Machine.** A daily backup catches anything Vectors 0–5 miss.
