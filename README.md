@@ -498,7 +498,8 @@ Where things live after `make daemon-install`:
 | `~/Library/Application Support/imessage-unsent/scripts/`          | Copy of `scripts/` used by recovery      |
 | `~/Library/Application Support/imessage-unsent/archives/`         | One subdirectory per recovery (mode 0700)|
 | `~/Library/Application Support/imessage-unsent/daemon.sock`       | Control socket (mode 0600; archive delete/compact only)|
-| `~/Library/Logs/imessage-unsent/watcher.log`                      | Daemon stdout + stderr                   |
+| `~/Library/Logs/imessage-unsent/watcher.log`                      | Daemon log — handles redacted, rotated at 4 MB |
+| `~/Library/Logs/imessage-unsent/watcher.err.log`                  | launchd stdout/stderr (crash output only) |
 | `~/.config/imessage-unsent/config.toml`                           | Optional config (defaults are fine)      |
 
 > [!NOTE]
@@ -511,6 +512,21 @@ Tail the daemon log:
 
 ```bash
 tail -f ~/Library/Logs/imessage-unsent/watcher.log
+```
+
+> [!NOTE]
+> Correspondent handles are redacted to a salted fingerprint (`handle=h:3f9a…`) before
+> anything is written ([#174](https://github.com/tyhallcsu/imessage-unsent/issues/174)).
+> The fingerprint is stable, so lines about the same person still correlate, and the
+> salt lives at `~/Library/Application Support/imessage-unsent/log-salt` (0600) — an
+> unsalted hash of a phone number is a ~10^10 search space and would reverse in seconds.
+> `rowid` and `guid` are kept in the clear; they are what ties a line to its archive.
+>
+> **Logs written before this shipped are not redacted retroactively** — rewriting them
+> in place would be a false promise about data that has already been backed up. Delete
+> `watcher.log` if the old contents matter to you.
+
+```bash
 ```
 
 Uninstall (`launchctl bootout` + remove plist + remove installed binary/scripts):
