@@ -588,7 +588,7 @@ echo '{"op":"ping"}' | nc -U ~/Library/Application\ Support/imessage-unsent/daem
 echo '{"op":"status"}' | nc -U ~/Library/Application\ Support/imessage-unsent/daemon.sock
 # {"ok":true,"status":{"data_dir":"...","last_error":null,"last_wal_change_at":"...",
 #  "last_wal_size":4096,"notifications_show":true,"recovery_count":3,"started_at":"...",
-#  "state":"watching","uptime_seconds":42,"version":"0.6.1"}}
+#  "state":"watching","uptime_seconds":42,"version":"0.6.2"}}
 
 # most recent recoveries (limit 1..50, default 5)
 echo '{"op":"recent","limit":3}' | nc -U ~/Library/Application\ Support/imessage-unsent/daemon.sock
