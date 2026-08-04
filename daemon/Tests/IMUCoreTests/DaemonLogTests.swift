@@ -150,3 +150,35 @@ final class DaemonLogTests: XCTestCase {
     XCTAssertTrue(contents().contains("second"))
   }
 }
+
+extension DaemonLogTests {
+  /// The gap in the first cut of #174: permissions were set only on create, so an
+  /// upgrade over a launchd-created 0644 file stayed world-readable forever.
+  /// Measured 0644 on a real install immediately after shipping the fix.
+  func testTightensPermissionsOnAPreExistingWorldReadableLog() throws {
+    let fm = FileManager.default
+    try fm.createDirectory(
+      at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true
+    )
+    fm.createFile(atPath: logURL.path, contents: Data("pre-existing\n".utf8))
+    try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: logURL.path)
+
+    DaemonLog(fileURL: logURL, saltURL: saltURL).write("first line after upgrade")
+
+    let mode = try fm.attributesOfItem(atPath: logURL.path)[.posixPermissions] as? NSNumber
+    XCTAssertEqual(mode?.intValue, 0o600, "an inherited 0644 log must be tightened, not kept")
+    // And the existing content is preserved — tightening is not truncation.
+    XCTAssertTrue(contents().contains("pre-existing"))
+  }
+
+  func testRotatedGenerationIsAlsoOwnerOnly() throws {
+    let log = DaemonLog(fileURL: logURL, saltURL: saltURL, maxBytes: 1_024)
+    for i in 0..<100 { log.write("line \(i) " + String(repeating: "y", count: 80)) }
+
+    let rotated = logURL.appendingPathExtension("1")
+    try XCTSkipUnless(FileManager.default.fileExists(atPath: rotated.path))
+    let mode = try FileManager.default
+      .attributesOfItem(atPath: rotated.path)[.posixPermissions] as? NSNumber
+    XCTAssertEqual(mode?.intValue, 0o600, "the rotated generation holds the same data")
+  }
+}
