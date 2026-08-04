@@ -7,11 +7,22 @@ public struct RetractionDetected: Equatable {
   public let handle: String
   public let editedAt: Int64
 
-  public init(rowid: Int64, guid: String, handle: String, editedAt: Int64) {
+  /// Receipt state for this row, or `nil` when the database lacks the receipt
+  /// columns. `nil` means "we don't know", never "it wasn't read".
+  public let readContext: RetractionReadContext?
+
+  public init(
+    rowid: Int64,
+    guid: String,
+    handle: String,
+    editedAt: Int64,
+    readContext: RetractionReadContext? = nil
+  ) {
     self.rowid = rowid
     self.guid = guid
     self.handle = handle
     self.editedAt = editedAt
+    self.readContext = readContext
   }
 }
 
@@ -185,7 +196,17 @@ public final class RetractionDetector {
       sqlite3_close(database)
     }
 
-    let candidates = try queryRetractions(database: database, after: state.lastSeenDateEdited)
+    // Receipt columns are additive metadata; detection is the daemon's job.
+    // Probe rather than assume, so a schema variant that lacks them degrades
+    // to "read state unknown" instead of failing every prepare and silently
+    // ending retraction detection altogether.
+    let hasReceiptColumns = messageTableHasReceiptColumns(database: database)
+
+    let candidates = try queryRetractions(
+      database: database,
+      after: state.lastSeenDateEdited,
+      includeReceiptColumns: hasReceiptColumns
+    )
     let processed = Set(state.processedGUIDs)
     return candidates.filter { !processed.contains($0.guid) }
   }
@@ -273,7 +294,34 @@ public final class RetractionDetector {
     }
   }
 
-  private func queryRetractions(database: OpaquePointer, after lastSeenDateEdited: Int64) throws -> [RetractionDetected] {
+  /// `PRAGMA table_info` over `message`, checked once per detect() pass.
+  /// Returns false on any error — an unreadable pragma must not be fatal to
+  /// detection, it just means we fall back to the columns we know exist.
+  private func messageTableHasReceiptColumns(database: OpaquePointer) -> Bool {
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(database, "PRAGMA table_info(message);", -1, &statement, nil) == SQLITE_OK,
+          let statement else {
+      sqlite3_finalize(statement)
+      return false
+    }
+    defer { sqlite3_finalize(statement) }
+
+    var found: Set<String> = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+      found.insert(sqliteText(statement, column: 1))
+    }
+    return Self.receiptColumns.isSubset(of: found)
+  }
+
+  private static let receiptColumns: Set<String> = [
+    "is_read", "date_read", "is_delivered", "date_delivered"
+  ]
+
+  private func queryRetractions(
+    database: OpaquePointer,
+    after lastSeenDateEdited: Int64,
+    includeReceiptColumns: Bool
+  ) throws -> [RetractionDetected] {
     var events: [RetractionDetected] = []
     var upperDateEdited = Int64.max
     var upperRowID = Int64.max
@@ -283,7 +331,8 @@ public final class RetractionDetector {
         database: database,
         after: lastSeenDateEdited,
         beforeDateEdited: upperDateEdited,
-        beforeRowID: upperRowID
+        beforeRowID: upperRowID,
+        includeReceiptColumns: includeReceiptColumns
       )
       events.append(contentsOf: page)
 
@@ -302,10 +351,14 @@ public final class RetractionDetector {
     database: OpaquePointer,
     after lastSeenDateEdited: Int64,
     beforeDateEdited upperDateEdited: Int64,
-    beforeRowID upperRowID: Int64
+    beforeRowID upperRowID: Int64,
+    includeReceiptColumns: Bool
   ) throws -> [RetractionDetected] {
+    let receiptSelection = includeReceiptColumns
+      ? ", is_read, date_read, is_delivered, date_delivered"
+      : ""
     let sql = """
-    SELECT ROWID, guid, handle_id, date_edited
+    SELECT ROWID, guid, handle_id, date_edited\(receiptSelection)
     FROM message
     WHERE is_from_me = 0 AND date_edited != 0 AND is_empty = 1
       AND date_edited > ?1
@@ -344,8 +397,25 @@ public final class RetractionDetector {
       let editedAt = sqlite3_column_int64(statement, 3)
       let handle = try lookupHandle(database: database, handleID: handleID) ?? String(handleID)
 
+      var readContext: RetractionReadContext?
+      if includeReceiptColumns {
+        readContext = RetractionReadContext(
+          isRead: sqlite3_column_int64(statement, 4) != 0,
+          dateRead: sqlite3_column_int64(statement, 5),
+          isDelivered: sqlite3_column_int64(statement, 6) != 0,
+          dateDelivered: sqlite3_column_int64(statement, 7),
+          editedAt: editedAt
+        )
+      }
+
       events.append(
-        RetractionDetected(rowid: rowid, guid: guid, handle: handle, editedAt: editedAt)
+        RetractionDetected(
+          rowid: rowid,
+          guid: guid,
+          handle: handle,
+          editedAt: editedAt,
+          readContext: readContext
+        )
       )
     }
   }

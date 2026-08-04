@@ -341,6 +341,24 @@ The same three states apply to `is_delivered` / `date_delivered`.
 - **Read-only invariant.** `mode=ro` guarantees `chat.db` and `chat.db-wal` are untouched (guarded in bats and in `tests/python/test_read_receipts.py::test_readonly_invariant`). SQLite *does* rebuild the `chat.db-shm` WAL index on attach — that file is a rebuildable index, not message data, and `immutable=1` is deliberately not used because it would make SQLite ignore the WAL, which is where this project's un-checkpointed rows live.
 - **Shared time helpers.** Vectors 7 and 8 both use [`scripts/lib/chatdb_time.py`](../scripts/lib/chatdb_time.py) so the Apple-epoch conversion cannot drift between the two tools.
 
+### Daemon integration — "did I read it before they unsent it?"
+
+The detector's SQL already reads the retracted row, so it also captures `is_read` / `date_read` / `is_delivered` / `date_delivered` and writes them into `manifest.json` under a `read_receipt` block. The GUI's detail view turns that into one line: **Read before unsend — yes/no/unknown.**
+
+Measured on a live 412,924-row `chat.db`: **all 83 of 83** retracted inbound rows still carried `date_read != 0` after the retraction — Messages does not clear the read state when a message is unsent. Of those, **29 were read before the retraction and 54 after**, with a median read→retract gap of **1.8 s** on the "before" set. So for roughly a third of retractions the archive can now say you had already seen it, and by how little.
+
+The same honesty rules as the CLI apply, and are enforced by tests rather than convention:
+
+| Situation | What is shown | Why |
+|---|---|---|
+| `date_read < date_edited` | "Yes — you read it N before it was unsent" | Both timestamps present and ordered. |
+| `date_read >= date_edited` | "No — the read receipt landed after the retraction" | You read the placeholder, not the message. An exactly-equal timestamp is not evidence you saw it first. |
+| `flagged_only` | "Marked read, but the time was never recorded — can't tell whether that was before the retraction" | Without a time there is no ordering to claim. |
+| `is_read = 0` | "No — never marked read" | |
+| Archive predates this feature | "Unknown — this archive predates read-receipt capture" | A missing field is not a negative. |
+| Manifest failed to load | "Unknown — archive details could not be loaded" | A load failure is a different unknown from a legacy archive. |
+| `message` lacks the receipt columns | No `read_receipt` block at all | The detector probes `PRAGMA table_info(message)` first. Receipt state is additive metadata; retraction detection is the daemon's job, and a hardcoded SELECT naming an absent column would fail every prepare and end detection silently. |
+
 ---
 
 ## Limitations — when each vector fails

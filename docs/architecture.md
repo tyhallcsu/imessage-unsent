@@ -72,7 +72,7 @@ flowchart TD
     F -- no --> Z[Update last_seen, exit]
     F -- yes --> G[ArchivePipeline.swift<br/>create archives/&lt;timestamp&gt;-&lt;rowid&gt;/]
     G --> H[Snapshot chat.db family<br/>cp -p with mtime preserved]
-    H --> I[Write manifest.json<br/>handle, rowid, guid, snap_files]
+    H --> I[Write manifest.json<br/>handle, rowid, guid, snap_files, read_receipt]
     I --> J[Spawn scripts/recover.sh<br/>against the snapshot, --json output]
     J --> K{recover.sh exit code}
     K -- 0, text recovered --> L[Write recovery.json<br/>with text_b64 of original message]
