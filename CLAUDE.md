@@ -59,6 +59,8 @@ make doctor
 
 `xcode-select -p` must point at `/Applications/Xcode.app/Contents/Developer`. If it's `/Library/Developer/CommandLineTools`, swift tests fail with `no such module 'XCTest'`. Pass `DEVELOPER_DIR=` to override per-command without touching the system selector.
 
+`make python-check` invokes a bare `ruff`. If `ruff` isn't on `make`'s `PATH` — e.g. it's installed only as a Python module, inside a venv, or via pipx — the target dies with `ruff: No such file or directory` even though ruff is present. That's a local `PATH` gap, **not** a lint failure (CI installs `ruff` on `PATH`, so it passes there). Run the identical lint with `python3 -m ruff check <same file list>`, or put `ruff` on `PATH`.
+
 ## Common gotchas (already cost us a session)
 
 - **macOS Sequoia retraction predicate is `date_edited != 0 AND is_empty = 1`.** The `date_retracted` column exists in the schema but is unused on Darwin 24.x. Any code filtering on `date_retracted != 0` will silently miss every retraction. Top of `README.md` calls this out.
