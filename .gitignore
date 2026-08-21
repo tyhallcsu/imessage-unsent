@@ -63,3 +63,6 @@ artifacts/progress/progress.json
 artifacts/progress/events.jsonl
 artifacts/progress/.server.json
 artifacts/progress/.progress.lock
+
+# Session audit exhaust from the post-bash evidence hook (local only, never work)
+artifacts/evidence.log
