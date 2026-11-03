@@ -9,6 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Verified: macOS 15 / Darwin 24.x](https://img.shields.io/badge/Verified-macOS%2015%20%2F%20Darwin%2024.x-black.svg)](#prerequisites)
 [![Stack: bash + python](https://img.shields.io/badge/Stack-bash%20%2B%20python3-yellow.svg)](#usage)
+[![Swift components](assets/badge-swift.svg)](daemon/Package.swift)
 [![Status: tactical](https://img.shields.io/badge/Status-tactical-orange.svg)](#limitations)
 
 <img src="./assets/readme-banner.png" alt="imessage-unsent README banner showing the app icon and WAL recovery flow" width="960">
@@ -29,6 +30,18 @@ But SQLite doesn't overwrite pages in place — it writes new page images to a *
 | **Optional deps** | [`typedstream`](https://pypi.org/project/typedstream/) (pip), [`imessage-exporter`](https://github.com/ReagentX/imessage-exporter) (cargo) |
 | **Permission required** | Full Disk Access for your terminal |
 | **License** | [MIT](LICENSE) |
+
+## Start here
+
+| Goal | Reading path |
+|---|---|
+| Try a one-off recovery | [Prerequisites](#prerequisites) → [Usage](#usage). Recovery is best-effort; read [what cannot be recovered](#limitations--what-this-tool-cannot-recover) first. |
+| Set up ongoing monitoring | [Daemon and menu bar app](#run-the-daemon-and-menu-bar-app) → [working-app checklist](#working-app-checklist). |
+| Understand the technique | [Sequoia schema gotcha](#macos-sequoia-24x-gotcha--read-this-first) → [recovery vectors](#the-six-recovery-vectors) → [architecture](docs/architecture.md). |
+| Inspect behavior and boundaries | [Recover vs Restore](#modes--recover-vs-restore) · [Security and scope](SECURITY.md) · [Limitations](#limitations). |
+| Contribute | [Agent conventions](AGENTS.md) · [roadmap](https://github.com/tyhallcsu/imessage-unsent/issues/26) · [release process](docs/release-process.md). |
+
+The CLI, Swift daemon, and SwiftUI menu bar app are separate components. The original examples and technical reference below remain the source for setup details; conceptual chapter artwork is not a screenshot or proof of recovery.
 
 ## Table of contents
 
@@ -60,6 +73,8 @@ But SQLite doesn't overwrite pages in place — it writes new page images to a *
 > `m.date_edited != 0  AND  m.is_empty = 1`
 >
 > If your forensic tool filters on `date_retracted != 0` (the obvious-but-wrong column), it will silently miss every retraction. The schema is misleading. Empirical truth is: **unsend = "edited to empty"**.
+
+![Understand the WAL — layered database pages and a magnifying lens](assets/understand-the-wal.jpg)
 
 ## How iMessage retraction actually works
 
@@ -404,6 +419,8 @@ Multiple GUID hits = multiple page-image versions. Frames where `text` is empty 
 
 > [!TIP]
 > **Length cross-check.** The recovered string's `len(text)` should match `otr.0.le` from the `message_summary_info` plist. If they match exactly, you have the right bytes.
+
+![Recover and review — preserved pages, a terminal symbol, and an archive tray](assets/recover-and-review.jpg)
 
 ## Usage
 
